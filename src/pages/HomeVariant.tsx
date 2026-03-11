@@ -2,6 +2,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import FAQSection from '../components/FAQSection';
+import ResponsibleAISection from '../components/ResponsibleAISection';
 import { SearchInput } from '../components/SearchInput';
 import RefereeGuarantorResponseModal from '../components/referencing/RefereeGuarantorResponseModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -650,6 +651,7 @@ const HomeVariant = ({ hideOnboardingModal = false }: HomeVariantProps) => {
       </section>
 
       <FAQSection />
+      <ResponsibleAISection />
       <Footer />
 
     </div>

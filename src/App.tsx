@@ -40,6 +40,8 @@ import { AuthRedirectHandler } from './components/common/AuthRedirectHandler';
 import SearchResults from './pages/SearchResults';
 import HomeVariant from './pages/HomeVariant';
 import Pricing from './pages/Pricing';
+import ResponsibleAI from './pages/ResponsibleAI';
+import ResponsibleAIToast from './components/ResponsibleAIToast';
 import Tools from './pages/Tools';
 import ReadinessChecker from './pages/tools/ReadinessChecker';
 import DocumentTracker from './pages/tools/DocumentTracker';
@@ -61,6 +63,7 @@ export const App: React.FC = () => {
           <SignedContractsProvider>
               <AuthAnalyticsBridge />
               <AuthRedirectHandler />
+              <ResponsibleAIToast />
               <Routes>
             {/* Public Routes - home-v2 is default landing; onboarding shows as modal overlay */}
             <Route path="/" element={<Navigate to="/home-v2" replace />} />
@@ -79,6 +82,7 @@ export const App: React.FC = () => {
             <Route path="/terms-of-service" element={<TermsOfService />} />
             <Route path="/faq" element={<FAQ />} />
             <Route path="/pricing" element={<Pricing />} />
+            <Route path="/responsible-ai" element={<ResponsibleAI />} />
 
             {/* Legacy / marketing URL redirects */}
             <Route path="/about" element={<Navigate to="/about-us" replace />} />

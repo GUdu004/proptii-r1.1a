@@ -101,6 +101,11 @@ function Footer() {
                     </Link>
                   </li>
                   <li>
+                    <Link to="/responsible-ai" className="block py-1 hover:underline">
+                      Responsible AI
+                    </Link>
+                  </li>
+                  <li>
                     <Link to="/privacy-policy" className="block py-1 hover:underline">
                       Privacy Policy
                     </Link>
@@ -211,6 +216,11 @@ function Footer() {
                 <li>
                   <Link to="/faq" className="hover:underline">
                     FAQ
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/responsible-ai" className="hover:underline">
+                    Responsible AI
                   </Link>
                 </li>
                 <li>
