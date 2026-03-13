@@ -100,36 +100,54 @@ const variants: RAIVariant[] = [
   },
 ];
 
-const INTERVAL_MS = 2 * 60 * 1000; // 2 minutes between toasts
+const INTERVAL_MS = 3 * 60 * 1000; // 3 minutes between toasts
+const LOCAL_STORAGE_KEY = 'proptii_rai_shown';
+const MAX_PER_VISIT = 3;
 
 const ResponsibleAIToast = () => {
   const [toastVisible, setToastVisible] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [variant, setVariant] = useState<RAIVariant | null>(null);
   const [modalPage, setModalPage] = useState(0);
-  const shownRef = useRef<string[]>([]);
+  const sessionShownCountRef = useRef(0);
   const doneRef = useRef(false);
 
-  // Show the next unseen variant, or mark done if all shown
+  // Show the next unseen variant, or mark done if max shown
   const showNext = useCallback(() => {
     if (doneRef.current) return;
-    const remaining = variants.filter((v) => !shownRef.current.includes(v.id));
+
+    if (sessionShownCountRef.current >= MAX_PER_VISIT) {
+      doneRef.current = true;
+      return;
+    }
+
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const globallyShown: string[] = stored ? JSON.parse(stored) : [];
+
+    const remaining = variants.filter((v) => !globallyShown.includes(v.id));
     if (remaining.length === 0) {
       doneRef.current = true;
       return;
     }
+
     const pick = remaining[0];
-    shownRef.current.push(pick.id);
+    const newGloballyShown = [...globallyShown, pick.id];
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newGloballyShown));
+    sessionShownCountRef.current += 1;
+
     setVariant(pick);
     setToastVisible(true);
-    if (remaining.length === 1) doneRef.current = true;
+
+    if (newGloballyShown.length >= variants.length || sessionShownCountRef.current >= MAX_PER_VISIT) {
+      doneRef.current = true;
+    }
   }, []);
 
-  // First toast after 1s, then every 2 minutes until all 5 shown
+  // First toast after 1 minute, then every 3 minutes until max shown
   useEffect(() => {
     const firstTimer = setTimeout(() => {
       showNext();
-    }, 1000);
+    }, 60000);
 
     const interval = setInterval(() => {
       showNext();
