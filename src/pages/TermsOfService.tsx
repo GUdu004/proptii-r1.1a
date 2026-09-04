@@ -37,7 +37,7 @@ const TermsOfService = () => {
                         <div className="bg-white rounded-lg shadow-sm p-6">
                             <h2 className="text-2xl font-bold text-[#374957] mb-4">1. Introduction</h2>
                             <p className="text-gray-600">
-                                Luxcity is used by a platform that allows users to search for rental properties, book viewings, get verified, and sign tenancy agreements. These Terms apply to all users, including tenants, landlords, agents, and property managers.
+                                Luxcity UK Ltd, trading as Proptii (“we”) provides the Proptii platform, allowing users to search for rental properties, book viewings, get verified, and sign tenancy agreements. These Terms apply to all users, including tenants, landlords, agents, and property managers.
                             </p>
                         </div>
 
