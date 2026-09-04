@@ -12,6 +12,7 @@ import { AuthRedirectHandler } from './components/common/AuthRedirectHandler';
 import { StripeCheckoutReturnHandler } from './components/common/StripeCheckoutReturnHandler';
 import BillingStatusBanner from './components/billing/BillingStatusBanner';
 import { AuthAnalyticsBridge } from './components/analytics/AuthAnalyticsBridge';
+import CookieNotice from './components/CookieNotice';
 import DevAuthToolbar from './components/dev/DevAuthToolbar';
 import RoleGate from './components/common/RoleGate';
 
@@ -41,6 +42,7 @@ const LandlordDemo        = lazy(() => import('./pages/LandlordDemo'));
 const AboutUs             = lazy(() => import('./pages/AboutUs'));
 const PrivacyPolicy       = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfService      = lazy(() => import('./pages/TermsOfService'));
+const CookiePolicy        = lazy(() => import('./pages/CookiePolicy'));
 const FAQ                 = lazy(() => import('./pages/FAQ'));
 const SearchResults       = lazy(() => import('./pages/SearchResults'));
 const Pricing             = lazy(() => import('./pages/pricing'));
@@ -115,6 +117,7 @@ export const App: React.FC = () => {
             <OnboardingSessionProvider>
               <SignedContractsProvider>
               <AuthAnalyticsBridge />
+              <CookieNotice />
               <StripeCheckoutReturnHandler />
               <AuthRedirectHandler />
               <BillingStatusBanner />
@@ -137,6 +140,7 @@ export const App: React.FC = () => {
                 <Route path="/about-us" element={<AboutUs />} />
                 <Route path="/privacy-policy" element={<PrivacyPolicy />} />
                 <Route path="/terms-of-service" element={<TermsOfService />} />
+                <Route path="/cookie-policy" element={<CookiePolicy />} />
                 <Route path="/faq" element={<FAQ />} />
                 <Route path="/pricing" element={<Pricing />} />
                 <Route path="/claim-listing" element={<ClaimListing />} />

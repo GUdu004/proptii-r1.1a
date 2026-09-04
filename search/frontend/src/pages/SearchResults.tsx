@@ -702,9 +702,14 @@ function MapComponent({ center, properties = [], selectedProperty, onLocationSel
 
   useEffect(() => {
     // Load Google Maps script
+    const mapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
     if (!window.google) {
+      if (!mapsApiKey) {
+        console.warn('Maps key missing; map component will not load.');
+        return;
+      }
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyChXxNp1xBJtJB9pC5WxWoZw3__7nT3djU&libraries=places`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(mapsApiKey)}&libraries=places`;
       script.async = true;
       script.defer = true;
       script.onload = () => {

@@ -142,7 +142,7 @@ export class ClassifierService {
     // ── 1. Cache lookup ──────────────────────────────────────────────────────
     const cached = await this.getCached(query);
     if (cached) {
-      this.logger.debug(`[Classifier] Cache hit for "${query}"`);
+      this.logger.debug(`[Classifier] Cache hit (length=${query?.length ?? 0})`);
       return { ...cached, cacheHit: true };
     }
 
@@ -152,13 +152,13 @@ export class ClassifierService {
     if (!aiResult) {
       // Heuristic entity extraction fallback so filter pills ALWAYS work instantly
       const heuristic = extractHeuristicEntities(query);
-      this.logger.log(`[Classifier] Heuristic fallback for "${query}" → ${JSON.stringify(heuristic.entities)}`);
+      this.logger.log(`[Classifier] Heuristic fallback (length=${query?.length ?? 0})`);
       return { ...heuristic, fallback: true, cacheHit: false };
     }
 
     // ── 3. Cache successful result ───────────────────────────────────────────
     await this.setCached(query, aiResult);
-    this.logger.debug(`[Classifier] Classified "${query}" → ${aiResult.intent} (${aiResult.confidence})`);
+    this.logger.debug(`[Classifier] Classified (length=${query?.length ?? 0}) → ${aiResult.intent} (${aiResult.confidence})`);
 
     return { ...aiResult, cacheHit: false };
   }
