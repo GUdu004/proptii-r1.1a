@@ -24,7 +24,7 @@ const PrivacyPolicy = () => {
       <Navbar />
       {/* Hero Section */}
       <section
-        className="relative h-[80vh] bg-cover bg-center overflow-hidden"
+        className="relative h-[40vh] bg-cover bg-center overflow-hidden"
       >
         <div className="absolute inset-0 z-0 overflow-hidden">
           <img
@@ -38,7 +38,7 @@ const PrivacyPolicy = () => {
           />
           <div className="absolute inset-0 bg-[#0A2342]/80"></div>
         </div>
-        <div className="relative z-10 container mx-auto px-4 h-screen flex flex-col justify-center items-center text-center">
+        <div className="relative z-10 container mx-auto px-4 h-full flex flex-col justify-center items-center text-center pt-20">
           <h1 className="text-5xl md:text-7xl font-bold text-white font-archivo">
             Privacy Policy
           </h1>
