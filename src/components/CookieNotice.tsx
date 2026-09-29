@@ -43,13 +43,17 @@ export function CookieNotice() {
       className="fixed bottom-0 inset-x-0 z-40 bg-[#0F2537] text-white text-sm px-4 py-3 md:px-6 flex flex-col md:flex-row md:items-center gap-3 justify-between"
     >
       <p className="opacity-90 max-w-3xl">
-        We only use cookies and browser storage that are needed to run Proptii
-        (sign-in and the forms you submit). We do not use analytics cookies.
-        Read our{' '}
-        <Link to="/cookie-policy" className="underline hover:text-gray-200">
-          Cookie Policy
-        </Link>
-        .
+        <span>
+          We only use cookies and browser storage that are needed to run Proptii
+          (sign-in and the forms you submit).
+        </span>
+        <span className="block">
+          We do not use analytics cookies. Read our{' '}
+          <Link to="/cookie-policy" className="underline hover:text-gray-200">
+            Cookie Policy
+          </Link>
+          .
+        </span>
       </p>
       <button
         type="button"
