@@ -51,7 +51,7 @@ describe('Section 1 & 2: Health, Runtime Flags & Auth Endpoints', () => {
     let authController: AuthController;
 
     beforeEach(() => {
-      authController = new AuthController();
+      authController = new AuthController({ recordAttribution: async () => null } as any);
     });
 
     it('[GET /auth/me & POST /auth/me] returns current user identity and role', async () => {

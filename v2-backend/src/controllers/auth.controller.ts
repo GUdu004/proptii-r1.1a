@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiProperty
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { FirebaseAuthGuard } from '../guards/firebase-auth.guard';
 import * as admin from 'firebase-admin';
+import { SignupAttributionService } from '../services/signup-attribution.service';
 
 export class UpdateRoleDto {
   @ApiProperty({ enum: ['tenant', 'landlord', 'agent'], description: 'Desired user role' })
@@ -16,10 +17,34 @@ export class UpdateRoleDto {
   source?: string;
 }
 
+export class SignupAttributionDto {
+  @ApiProperty({ required: false, description: 'Channel or partner code from a /join/<code> link' })
+  @IsOptional()
+  @IsString()
+  code?: string;
+}
+
 @ApiTags('Auth')
 @ApiBearerAuth('bearer')
 @Controller('auth')
 export class AuthController {
+  constructor(private readonly signupAttribution: SignupAttributionService) {}
+
+  @Post('attribution')
+  @UseGuards(FirebaseAuthGuard)
+  @ApiOperation({ summary: 'Record where a new account came from (write-once, first touch wins)' })
+  @ApiBody({ type: SignupAttributionDto })
+  @ApiResponse({ status: 200, description: 'Attribution recorded, or the existing one returned' })
+  async recordAttribution(@Req() req: any, @Body() body: SignupAttributionDto) {
+    const uid = req.user?.uid;
+    try {
+      const result = await this.signupAttribution.recordAttribution(uid, body?.code);
+      return { success: true, ...(result || {}) };
+    } catch (error: any) {
+      console.error(`[AuthController] Signup attribution failed for uid=${uid}:`, error?.message || error);
+      return { success: false };
+    }
+  }
 
   @Get('me')
   @Post('me')

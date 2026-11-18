@@ -12,6 +12,8 @@ import { AuthRedirectHandler } from './components/common/AuthRedirectHandler';
 import { StripeCheckoutReturnHandler } from './components/common/StripeCheckoutReturnHandler';
 import BillingStatusBanner from './components/billing/BillingStatusBanner';
 import { AuthAnalyticsBridge } from './components/analytics/AuthAnalyticsBridge';
+import { SignupAttributionBridge } from './components/analytics/SignupAttributionBridge';
+import JoinPage from './pages/JoinPage';
 import DevAuthToolbar from './components/dev/DevAuthToolbar';
 import RoleGate from './components/common/RoleGate';
 
@@ -125,6 +127,7 @@ export const App: React.FC = () => {
             <OnboardingSessionProvider>
               <SignedContractsProvider>
               <AuthAnalyticsBridge />
+              <SignupAttributionBridge />
               <StripeCheckoutReturnHandler />
               <AuthRedirectHandler />
               <BillingStatusBanner />
@@ -158,6 +161,7 @@ export const App: React.FC = () => {
                 <Route path="/invite/tenant" element={<TenantInvitePage />} />
                 <Route path="/guarantor-reference" element={<GuarantorReferencePage />} />
                 <Route path="/guarantor-form" element={<GuarantorReferencePage />} />
+                <Route path="/join/:code" element={<JoinPage />} />
                 <Route path="/signup" element={<SignupModalPage />} />
                 <Route path="/signup/create-account" element={<CreateAccountPage />} />
                 <Route path="/signup/welcome" element={<SignupWelcomePage />} />
