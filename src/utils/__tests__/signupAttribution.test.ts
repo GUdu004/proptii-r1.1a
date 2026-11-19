@@ -5,7 +5,33 @@ import {
   hasSentAttribution,
   markAttributionSent,
   normalizeSignupCode,
+  resolveJoinLanding,
 } from '../signupAttribution';
+
+describe('resolveJoinLanding', () => {
+  const invite = 'https://luxcity-global.github.io/landlord-Invite/';
+
+  it('sends design partner codes to the invite page', () => {
+    expect(resolveJoinLanding('dp')).toBe(invite);
+    expect(resolveJoinLanding('DP')).toBe(invite);
+    expect(resolveJoinLanding('dp-acme')).toBe(invite);
+  });
+
+  it('sends other channels to the landlord homepage', () => {
+    for (const code of ['broker', 'acct', 'lg', 'ref', 'pn', 'inbound', 'broker-acme']) {
+      expect(resolveJoinLanding(code)).toBe('/?audience=landlords');
+    }
+  });
+
+  it('does not treat lookalike codes as design partners', () => {
+    expect(resolveJoinLanding('dpx')).toBe('/?audience=landlords');
+  });
+
+  it('falls back to the landlord homepage for missing or invalid codes', () => {
+    expect(resolveJoinLanding(undefined)).toBe('/?audience=landlords');
+    expect(resolveJoinLanding('https://evil.example')).toBe('/?audience=landlords');
+  });
+});
 
 describe('signupAttribution', () => {
   beforeEach(() => localStorage.clear());

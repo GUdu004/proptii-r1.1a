@@ -52,6 +52,26 @@ export function getStoredSignupCode(now = Date.now()): string | null {
   }
 }
 
+/** Default landing for /join links: the proptii.co homepage in its landlord view. */
+export const DEFAULT_JOIN_LANDING = '/?audience=landlords';
+
+/**
+ * Landing pages for channels that don't go straight to sign-up, keyed by the
+ * code's channel prefix: `dp` covers `dp` and per-partner codes like `dp-acme`.
+ * Only URLs listed here are ever redirected to, so a code can't become an open redirect.
+ */
+const JOIN_LANDINGS: Record<string, string> = {
+  dp: 'https://luxcity-global.github.io/landlord-Invite/',
+};
+
+/** Where a /join/<code> link should send the visitor: an absolute URL or an in-app path. */
+export function resolveJoinLanding(raw: string | null | undefined): string {
+  const code = normalizeSignupCode(raw);
+  if (!code) return DEFAULT_JOIN_LANDING;
+  const prefix = code.split('-')[0];
+  return JOIN_LANDINGS[prefix] ?? DEFAULT_JOIN_LANDING;
+}
+
 export function hasSentAttribution(uid: string): boolean {
   try {
     return localStorage.getItem(SENT_PREFIX + uid) === '1';
