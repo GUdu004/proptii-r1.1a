@@ -76,3 +76,6 @@ search/backend/.cache/puppeteer/
 .zip*/
 drive-download*/
 
+
+# Generated sign-up links sheet (npm run seed:signup-channels)
+v2-backend/scripts/output/
