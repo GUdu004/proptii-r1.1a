@@ -9,6 +9,7 @@ import adminDashboardService, {
 } from '../../services/adminDashboardService';
 import { ADMIN_PATH } from './adminAccess';
 import { AdminRoute } from './AdminRoute';
+import { SignupsByChannelView } from './SignupsByChannelView';
 import './adminDashboard.css';
 
 function formatDate(value?: string | null) {
@@ -597,6 +598,7 @@ const ProptiiAdminPage: React.FC = () => {
         <nav className="pa-nav">
           <NavLink to={ADMIN_PATH} end className={({ isActive }) => (isActive ? 'active' : '')}>Customers</NavLink>
           <NavLink to={`${ADMIN_PATH}/overview`} className={({ isActive }) => (isActive ? 'active' : '')}>Tier & cohort</NavLink>
+          <NavLink to={`${ADMIN_PATH}/signups`} className={({ isActive }) => (isActive ? 'active' : '')}>Sign-ups by channel</NavLink>
           <NavLink to={`${ADMIN_PATH}/alerts`} className={({ isActive }) => (isActive ? 'active' : '')}>Ops alerts</NavLink>
           <NavLink to={`${ADMIN_PATH}/partners`} className={({ isActive }) => (isActive ? 'active' : '')}>B2B / API</NavLink>
         </nav>
@@ -610,6 +612,7 @@ const ProptiiAdminPage: React.FC = () => {
         <Routes location={location}>
           <Route index element={<CustomerList />} />
           <Route path="overview" element={<Overview />} />
+          <Route path="signups" element={<SignupsByChannelView />} />
           <Route path="alerts" element={<AlertsView />} />
           <Route path="partners" element={<PartnersView />} />
           <Route path="customers/:id" element={<CustomerDetail />} />

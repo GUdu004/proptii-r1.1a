@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { firstIso, toIso } from '../utils/firestore-date';
+import { aggregateSignupsByChannel, type SignupReport } from '../utils/signup-report';
 
 const PAID_PLAN_IDS = new Set([
   'renter_pro',
@@ -549,6 +550,54 @@ export class AdminDashboardService {
       billingStatus: Object.entries(byBilling).map(([status, count]) => ({ status, count })),
       cohorts: cohortRows,
     };
+  }
+
+  /**
+   * Sign-ups by channel, from `account_created` events (written by
+   * POST /auth/attribution). An event, or its user, with
+   * `excludeFromReports: true` is left out (use it for test accounts).
+   */
+  async signupsByChannel(actorEmail: string, weeks = 12): Promise<SignupReport> {
+    await this.logAccess(actorEmail, 'view_signups_by_channel');
+    const db = this.db;
+    if (!db) return aggregateSignupsByChannel({ events: [], channels: [], roles: new Map(), weeks });
+
+    const [eventSnap, channelDocs] = await Promise.all([
+      db.collection('events').where('type', '==', 'account_created').limit(10000).get(),
+      this.safeGetAll('signup_channels', ['code', 'channel', 'partner', 'active'], 1000),
+    ]);
+
+    const uids = [...new Set(eventSnap.docs.map((d) => d.get('uid')).filter((u): u is string => typeof u === 'string' && !!u))];
+    const roles = new Map<string, string | null>();
+    const excludedUsers = new Set<string>();
+    for (let i = 0; i < uids.length; i += 100) {
+      const refs = uids.slice(i, i + 100).map((uid) => db.collection('users').doc(uid));
+      const docs = await db.getAll(...refs, { fieldMask: ['role', 'excludeFromReports'] });
+      for (const doc of docs) {
+        roles.set(doc.id, (doc.get('role') as string) || null);
+        if (doc.get('excludeFromReports') === true) excludedUsers.add(doc.id);
+      }
+    }
+
+    const events = eventSnap.docs.map((d) => {
+      const data = d.data();
+      return {
+        uid: String(data.uid || ''),
+        at: toIso(data.at),
+        signupSource: String(data.signupSource || ''),
+        signupChannel: String(data.signupChannel || ''),
+        excluded: data.excludeFromReports === true || excludedUsers.has(String(data.uid || '')),
+      };
+    });
+
+    const channels = channelDocs.map(({ id, data }) => ({
+      code: String(data.code || id),
+      channel: String(data.channel || ''),
+      partner: (data.partner as string) ?? null,
+      active: data.active !== false,
+    }));
+
+    return aggregateSignupsByChannel({ events, channels, roles, weeks });
   }
 
   async alerts(actorEmail: string) {

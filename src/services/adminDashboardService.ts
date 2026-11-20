@@ -76,6 +76,32 @@ export interface AdminOverview {
   cohorts: Array<{ month: string; signups: number; paid: number; retainedPct: number }>;
 }
 
+/** GET /admin/signups-by-channel — counts only, no names or emails. */
+export interface AdminSignupReport {
+  generatedAt: string;
+  weeks: number;
+  totals: { allTime: number; last7Days: number; previous7Days: number; excluded: number };
+  channels: Array<{
+    channel: string;
+    label: string;
+    count: number;
+    pct: number;
+    last7Days: number;
+    roles: { landlord: number; tenant: number; agent: number; other: number };
+  }>;
+  codes: Array<{
+    code: string;
+    channel: string;
+    channelLabel: string;
+    partner: string | null;
+    known: boolean;
+    count: number;
+    last7Days: number;
+    lastSignupAt: string | null;
+  }>;
+  weekly: Array<{ weekStart: string; total: number; byChannel: Record<string, number> }>;
+}
+
 function isFallbackStatus(err: { status?: number } | null | undefined) {
   const status = err?.status;
   if (status === 401 || status === 403) return false;
@@ -301,6 +327,11 @@ class AdminDashboardService {
         partners: customers.filter((c) => c.role === 'landlord' || c.role === 'agent'),
       };
     }
+  }
+
+  async signupsByChannel(weeks = 12): Promise<AdminSignupReport> {
+    const res = await apiService.get<AdminSignupReport>(`/admin/signups-by-channel?weeks=${encodeURIComponent(String(weeks))}`);
+    return unwrap(res);
   }
 
   async addNote(userId: string, note: string, tag?: string): Promise<{ success: boolean }> {
