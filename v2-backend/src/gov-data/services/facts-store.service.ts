@@ -179,6 +179,24 @@ export class FactsStoreService {
     }
   }
 
+  /**
+   * Generic runtime flag reader (C1+).
+   * Missing doc → `defaultEnabled`. Explicit `enabled: true` required when default is false.
+   */
+  async isRuntimeFlagEnabled(flagId: string, defaultEnabled = false): Promise<boolean> {
+    const db = this.db;
+    if (!db || !flagId) return defaultEnabled;
+    try {
+      const doc = await db.collection(RUNTIME_FLAGS_COLLECTION).doc(flagId).get();
+      if (!doc.exists) return defaultEnabled;
+      const enabled = (doc.data() as any)?.enabled;
+      if (defaultEnabled) return enabled !== false;
+      return enabled === true;
+    } catch {
+      return defaultEnabled;
+    }
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
 
   private async safeRead(docId: string): Promise<PropertyFactsDoc | null> {
