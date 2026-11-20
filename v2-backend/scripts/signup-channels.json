@@ -1,0 +1,9 @@
+[
+  { "code": "dp", "channel": "design_partner", "partner": "Design partners (general)" },
+  { "code": "broker", "channel": "broker", "partner": "Brokers (general)" },
+  { "code": "acct", "channel": "accountant", "partner": "Accountants (general)" },
+  { "code": "lg", "channel": "landlord_group", "partner": "Landlord groups (general)" },
+  { "code": "ref", "channel": "landlord_referral", "partner": "Landlord referrals (general)" },
+  { "code": "pn", "channel": "personal_network", "partner": "Personal network" },
+  { "code": "inbound", "channel": "inbound", "partner": "Inbound (website, search, social)" }
+]
