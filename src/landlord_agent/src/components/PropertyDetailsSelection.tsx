@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { ArrowLeft, MapPin, PoundSterling, Bed, Bath, Home, Upload, FileText, X, Navigation, Map, Menu } from 'lucide-react';
+import { ArrowLeft, MapPin, PoundSterling, Bed, Bath, Home, Upload, FileText, X, Navigation, Map, Menu, AlertCircle } from 'lucide-react';
 import { ProgressTracker } from './ProgressTracker';
 import {
   DropdownMenu,
@@ -355,7 +355,31 @@ export function PropertyDetailsSelection({ propertyDetails: propPropertyDetails,
     };
   }, []);
 
-  const isFormValid = propertyDetails.address && propertyDetails.monthlyRent && propertyDetails.bedrooms && propertyDetails.bathrooms;
+  const rentValue = parseFloat(propertyDetails.monthlyRent);
+  const bedroomsValue = parseInt(propertyDetails.bedrooms, 10);
+  const bathroomsValue = parseInt(propertyDetails.bathrooms, 10);
+
+  const specWarning = React.useMemo(() => {
+    if (isNaN(bedroomsValue) || isNaN(bathroomsValue)) return null;
+    if (bedroomsValue === 0 && bathroomsValue > 1) {
+      return 'Studio properties typically have 1 bathroom. Please confirm this specification is intended.';
+    }
+    if (bedroomsValue === 1 && bathroomsValue >= 3) {
+      return 'A 1-bedroom flat configured with 3 or more bathrooms is unusual. Please confirm this specification is intended.';
+    }
+    if (bedroomsValue >= 2 && bathroomsValue > bedroomsValue + 2) {
+      return `Bathroom count (${bathroomsValue}) unusually exceeds bedroom count (${bedroomsValue}). Please verify this specification.`;
+    }
+    return null;
+  }, [bedroomsValue, bathroomsValue]);
+  const isFormValid =
+    propertyDetails.address?.trim() &&
+    propertyDetails.monthlyRent?.trim() &&
+    !isNaN(rentValue) && rentValue > 0 &&
+    propertyDetails.bedrooms?.trim() &&
+    !isNaN(bedroomsValue) && bedroomsValue >= 0 && bedroomsValue <= 50 &&
+    propertyDetails.bathrooms?.trim() &&
+    !isNaN(bathroomsValue) && bathroomsValue >= 0 && bathroomsValue <= 20;
 
   return (
     <div className="min-h-screen flex flex-col px-4" style={{ backgroundColor: '#F7F7F7', fontFamily: 'Archivo, sans-serif' }}>
@@ -581,6 +605,16 @@ export function PropertyDetailsSelection({ propertyDetails: propPropertyDetails,
                 </div>
               </div>
 
+              {specWarning && (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2.5 text-amber-900 text-xs shadow-xs">
+                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold text-amber-800">Specification Warning: </span>
+                    <span>{specWarning}</span>
+                  </div>
+                </div>
+              )}
+
               {/* Square Footage */}
               <div>
                 <label className="block text-sm font-semibold text-gray-900 mb-2">
@@ -609,7 +643,7 @@ export function PropertyDetailsSelection({ propertyDetails: propPropertyDetails,
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
                     <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
                     <p className="text-sm text-gray-600 mb-2">
-                      Upload property documents (lease agreements, certificates, etc.)
+                      Upload property documents (rent agreements, certificates, etc.)
                     </p>
                     <input
                       type="file"
