@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiProperty } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiProperty, ApiQuery } from '@nestjs/swagger';
 import { IsOptional, IsString, MinLength } from 'class-validator';
 import { FirebaseAuthGuard } from '../guards/firebase-auth.guard';
 import { AdminGuard } from '../guards/admin.guard';
@@ -71,6 +71,15 @@ export class AdminDashboardController {
   @ApiResponse({ status: 200, description: 'Aggregated overview metrics' })
   overview(@Req() req: any) {
     return this.adminDashboard.overview(req.user?.email || 'unknown');
+  }
+
+  @Get('signups-by-channel')
+  @ApiOperation({ summary: 'Sign-ups by channel and partner code, from account_created events' })
+  @ApiQuery({ name: 'weeks', required: false, description: 'Weeks in the weekly breakdown (1-52, default 12)' })
+  @ApiResponse({ status: 200, description: 'Totals, per-channel and per-code counts, and weekly breakdown' })
+  signupsByChannel(@Req() req: any, @Query('weeks') weeks?: string) {
+    const n = Number.parseInt(weeks || '', 10);
+    return this.adminDashboard.signupsByChannel(req.user?.email || 'unknown', Number.isFinite(n) ? n : 12);
   }
 
   @Get('alerts')

@@ -386,6 +386,32 @@
   background: var(--pa-blue);
 }
 
+/* Sign-ups by channel */
+.pa-select {
+  height: 36px;
+  border: 1px solid var(--pa-border);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: var(--pa-card);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.pa-table-static tbody tr {
+  cursor: default;
+}
+
+.pa-table-static .pa-bar {
+  margin-top: 0;
+}
+
+.pa-stat small {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
 .pa-note-form {
   display: flex;
   gap: 8px;
