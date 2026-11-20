@@ -12,6 +12,26 @@ const path = require('path');
 
 const DIST = path.resolve(__dirname, '..', 'dist');
 const INDEX = path.join(DIST, 'index.html');
+const SIGNUP_CHANNELS = path.resolve(__dirname, '..', 'v2-backend', 'scripts', 'signup-channels.json');
+const SIGNUP_CODE_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
+
+/**
+ * One join/<code> path per sign-up channel code, so /join/<code> links return
+ * HTTP 200 (link previews and email scanners treat a 404 as a broken link).
+ * Codes not in the list still work through 404.html, just with a 404 status.
+ */
+function joinRouteDirs() {
+  try {
+    const rows = JSON.parse(fs.readFileSync(SIGNUP_CHANNELS, 'utf8'));
+    return rows
+      .map((r) => r && r.code)
+      .filter((code) => typeof code === 'string' && SIGNUP_CODE_PATTERN.test(code))
+      .map((code) => `join/${code}`);
+  } catch (err) {
+    console.warn(`copy-spa-fallbacks: could not read sign-up channels (${err.message}); skipping /join pages`);
+    return [];
+  }
+}
 
 /** Paths that must load the SPA shell (no leading/trailing slashes). */
 const SPA_ROUTE_DIRS = [
@@ -59,8 +79,9 @@ function main() {
 
   const indexHtml = fs.readFileSync(INDEX, 'utf8');
   let created = 0;
+  const routeDirs = [...SPA_ROUTE_DIRS, ...joinRouteDirs()];
 
-  for (const routeDir of SPA_ROUTE_DIRS) {
+  for (const routeDir of routeDirs) {
     const dir = path.join(DIST, routeDir);
     fs.mkdirSync(dir, { recursive: true });
     const target = path.join(dir, 'index.html');
@@ -76,7 +97,7 @@ function main() {
   fs.writeFileSync(path.join(DIST, '404.html'), indexHtml);
 
   console.log(
-    `copy-spa-fallbacks: ensured ${SPA_ROUTE_DIRS.length} SPA shell paths (${created} written)`,
+    `copy-spa-fallbacks: ensured ${routeDirs.length} SPA shell paths (${created} written)`,
   );
 }
 
