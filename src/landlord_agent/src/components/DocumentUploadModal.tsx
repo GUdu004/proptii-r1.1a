@@ -34,6 +34,7 @@ export function DocumentUploadModal({ isOpen, onClose, onUpload, isUploading = f
   const documentTypes = [
     { value: 'epc',                 label: 'EPC Certificate' },
     { value: 'gas-cert',            label: 'Gas Safety Certificate' },
+    { value: 'eicr',                label: 'Electrical Installation Condition Report (EICR)' },
     { value: 'tenancy-agreement',   label: 'Tenancy Agreement' },
     { value: 'insurance',           label: 'Insurance Document' },
     { value: 'other',               label: 'Other Document' },

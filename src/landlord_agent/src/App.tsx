@@ -15,7 +15,11 @@ import { AmenitiesSelection } from './components/AmenitiesSelection';
 import { ImagesAndNotesSelection } from './components/ImagesAndNotesSelection';
 import { AddPropertyWizard } from './components/AddPropertyWizard';
 import type { WizardPropertyData } from './components/AddPropertyWizard';
-import { EditProperty } from './components/EditProperty';
+import type {
+  ComplianceDocKey,
+  WizardComplianceDocuments,
+} from './components/PropertyComplianceStep';
+import { resolveClassificationFromStoredType } from '../../shared/propertyCatalogue';
 import { PhotoUpload } from './components/PhotoUpload';
 import { Dashboard } from './components/Dashboard';
 import { PropertyDetails } from './components/PropertyDetails';
@@ -45,6 +49,7 @@ import { PropertyEnrichmentQueue } from './components/PropertyEnrichmentQueue';
 import { documentService } from './services/documentService';
 import type { LandlordDocument } from './services/documentService';
 import { propertyService } from './services/propertyService';
+import { formatMissingVerification, getAccountVerification } from './services/verificationService';
 import { tenantService } from './services/tenantService';
 import { marketInsightService } from './services/marketInsightService';
 import { getResolvedApiBaseUrl } from '../../config/apiBaseUrl';
@@ -91,7 +96,140 @@ const LazyFallback = () => (
 );
 
 export * from './types';
-import type { Tenant, Property } from './types';
+import type { Tenant, Property, PropertyDocument, PropertyPhoto, PropertySetupData } from './types';
+
+/** Extra catalogue fields copied from wizard → Property */
+function wizardExtrasOntoProperty(wizardData: WizardPropertyData): Record<string, unknown> {
+  const subtypeId = wizardData.propertySubtype || wizardData.propertyType || null;
+  const classification =
+    (wizardData.propertyCategory && wizardData.propertyTypeGroup && subtypeId
+      ? {
+          categoryId: wizardData.propertyCategory,
+          typeGroupId: wizardData.propertyTypeGroup,
+          subtypeId,
+        }
+      : null) ||
+    (subtypeId ? resolveClassificationFromStoredType(subtypeId) : null);
+
+  const extras: Record<string, unknown> = {
+    description: wizardData.description || '',
+    amenityDetails: wizardData.amenityDetails ?? [],
+    additionalFeatures: wizardData.additionalFeatures || '',
+  };
+  if (classification) extras.propertyClassification = classification;
+
+  const passThrough = [
+    'receptionRooms',
+    'floorNumber',
+    'constructionType',
+    'tenure',
+    'epcRating',
+    'propertyUse',
+    'numberOfFloors',
+    'buildingSpecification',
+    'permittedUse',
+    'businessRates',
+    'landArea',
+    'planningStatus',
+    'landAccess',
+    'landUtilities',
+    'boundaries',
+    'takesDeposit',
+    'depositAmount',
+    'depositProtectionConfirmed',
+    'depositProtectedBy',
+  ] as const;
+
+  for (const key of passThrough) {
+    const v = wizardData[key];
+    if (v !== undefined && v !== null && String(v).trim() !== '') {
+      extras[key] = v;
+    }
+  }
+  return extras;
+}
+
+const COMPLIANCE_KEYS: ComplianceDocKey[] = [
+  'gas-cert',
+  'eicr',
+  'epc',
+  'deposit-protection',
+];
+
+function complianceFromPropertyDocs(
+  docs: Property['documents'] | undefined,
+  epcRatingFallback?: string,
+): WizardComplianceDocuments {
+  const out: WizardComplianceDocuments = {};
+  for (const key of COMPLIANCE_KEYS) {
+    const match = (docs || []).find((d) => d.type === key);
+    if (!match) continue;
+    out[key] = {
+      fileName: match.name,
+      url: match.url,
+      storagePath: match.storagePath,
+      ...(key === 'epc'
+        ? { epcRating: match.epcRating || epcRatingFallback || '' }
+        : {}),
+    };
+  }
+  if (!out.epc && epcRatingFallback) {
+    out.epc = { epcRating: epcRatingFallback };
+  }
+  return out;
+}
+
+function wizardToInitialData(property: Property): Partial<WizardPropertyData> {
+  const classification =
+    property.propertyClassification ||
+    resolveClassificationFromStoredType(property.type) ||
+    null;
+  const complianceDocuments = complianceFromPropertyDocs(
+    property.documents,
+    property.epcRating,
+  );
+  return {
+    propertyType: classification?.subtypeId || property.type || null,
+    propertyCategory: (classification?.categoryId as WizardPropertyData['propertyCategory']) || null,
+    propertyTypeGroup: classification?.typeGroupId || null,
+    propertySubtype: classification?.subtypeId || null,
+    address: property.address || '',
+    monthlyRent: property.rent != null ? String(property.rent) : '',
+    bedrooms: property.bedrooms != null ? String(property.bedrooms) : '',
+    bathrooms: property.bathrooms != null ? String(property.bathrooms) : '',
+    squareFootage: property.squareFootage != null ? String(property.squareFootage) : '',
+    amenities: property.amenities || [],
+    amenityDetails: property.amenityDetails as WizardPropertyData['amenityDetails'],
+    additionalFeatures: property.additionalFeatures || '',
+    description: property.description || property.notes || '',
+    additionalNotes: property.notes || '',
+    images: (property.photos || []).map((p) => p.url).filter(Boolean),
+    imageFiles: [],
+    uploadedDocuments: [],
+    complianceDocuments,
+    takesDeposit: (property as any).takesDeposit ?? null,
+    depositAmount: (property as any).depositAmount != null ? String((property as any).depositAmount) : '',
+    depositProtectionConfirmed: Boolean((property as any).depositProtectionConfirmed),
+    depositProtectedBy: (property as any).depositProtectedBy ?? null,
+    photosConfirmed: (property.photos || []).length > 0,
+    status: property.status === 'archived' ? 'vacant' : property.status,
+    receptionRooms: property.receptionRooms != null ? String(property.receptionRooms) : '',
+    floorNumber: property.floorNumber || '',
+    constructionType: property.constructionType || '',
+    tenure: property.tenure || '',
+    epcRating: property.epcRating || complianceDocuments.epc?.epcRating || '',
+    propertyUse: property.propertyUse || '',
+    numberOfFloors: property.numberOfFloors != null ? String(property.numberOfFloors) : '',
+    buildingSpecification: property.buildingSpecification || '',
+    permittedUse: property.permittedUse || '',
+    businessRates: property.businessRates != null ? String(property.businessRates) : '',
+    landArea: property.landArea || '',
+    planningStatus: property.planningStatus || '',
+    landAccess: property.landAccess || '',
+    landUtilities: property.landUtilities || '',
+    boundaries: property.boundaries || '',
+  };
+}
 
 /** Azure B2C sign-in URL for guest users in empty state */
 const SIGN_IN_URL = 'https://proptii.b2clogin.com/proptii.onmicrosoft.com/b2c_1_signupandsigninproptii/oauth2/v2.0/authorize?client_id=532e1fa0-18a6-4356-bd78-1f62bd6d5e2f&scope=openid%20profile%20email%20offline_access&redirect_uri=https%3A%2F%2Fproptii.co&client-request-id=019c89da-c0f9-7dde-8814-96ced1d1ac4a&response_mode=fragment&client_info=1&nonce=019c89da-c0fd-7ed4-acf5-ad3b2621c727&state=eyJpZCI6IjAxOWM4OWRhLWMwZmEtNzcwOC1iYjYwLTRiM2MzODZkZmJiZCIsIm1ldGEiOnsiaW50ZXJhY3Rpb25UeXBlIjoicmVkaXJlY3QifX0%3D&claims=%7B%22id_token%22%3A%7B%22extension_PhoneNumber%22%3Anull%7D%7D&x-client-SKU=msal.js.browser&x-client-VER=4.12.0&response_type=code&code_challenge=YWSXzXu9cBV85rUs9pzakoUBSnweIFd2NW-SzZdpjyI&code_challenge_method=S256';
@@ -396,6 +534,31 @@ export function AppContent() {
     }));
   }, []);
 
+  /** Open the multi-step Add Property wizard in edit mode for an existing listing. */
+  const openEditPropertyWizard = useCallback((property: Property) => {
+    setSelectedProperty(property);
+    setIsEditing(true);
+    setEditingPropertyId(property.id);
+    // Clear stale add-flow draft so it cannot override the property being edited
+    setPropertySetupData({
+      propertyType: null,
+      propertyDetails: {
+        address: '',
+        monthlyRent: '',
+        bedrooms: '',
+        bathrooms: '',
+        squareFootage: '',
+        uploadedDocuments: [],
+      },
+      amenities: [],
+      images: [],
+      imageFiles: [],
+      additionalNotes: '',
+      pendingTenants: [],
+    });
+    navigateToScreen('property-setup-step1');
+  }, []);
+
   // Sync with host authentication context
   React.useEffect(() => {
     setIsAuthLoading(hostIsLoading);
@@ -672,6 +835,7 @@ export function AppContent() {
   // Helper to upload a file to backend storage endpoint with signed download tokens
   const uploadToBackendStorage = async (file: File | Blob, folder: string, filename?: string): Promise<string> => {
     const apiBase = getResolvedApiBaseUrl();
+    const uploadUrl = `${apiBase}/storage/upload`;
     const formData = new FormData();
     formData.append('file', file, filename || (file as File).name || 'file');
     formData.append('folder', folder);
@@ -682,10 +846,15 @@ export function AppContent() {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${apiBase}/storage/upload`, {
+    if (import.meta.env.DEV) {
+      console.log(`[upload] POST ${uploadUrl} (${Math.round((file as File).size / 1024 || 0)}KB) folder=${folder}`);
+    }
+
+    const response = await fetch(uploadUrl, {
       method: 'POST',
       headers,
       body: formData,
+      signal: AbortSignal.timeout(90000),
     });
 
     if (!response.ok) {
@@ -763,6 +932,59 @@ export function AppContent() {
     const validDocs = results.filter((d): d is PropertyDocument => d !== null && Boolean(d.url) && !d.url.startsWith('blob:'));
     console.log(`✅ ${validDocs.length}/${documentFiles.length} documents processed successfully`);
     return validDocs;
+  };
+
+  /** Upload / preserve typed UK compliance documents from the wizard. */
+  const uploadComplianceDocuments = async (
+    docs: WizardComplianceDocuments | undefined,
+  ): Promise<PropertyDocument[]> => {
+    if (!docs) return [];
+    const timestamp = Date.now();
+    const results: PropertyDocument[] = [];
+
+    for (const type of COMPLIANCE_KEYS) {
+      const entry = docs[type];
+      if (!entry) continue;
+
+      if (entry.file) {
+        try {
+          const downloadUrl = await uploadToBackendStorage(
+            entry.file,
+            'properties/documents',
+            entry.file.name,
+          );
+          results.push({
+            id: `doc-${timestamp}-${type}`,
+            name: entry.file.name,
+            type,
+            url: downloadUrl,
+            ...(type === 'epc' && entry.epcRating ? { epcRating: entry.epcRating } : {}),
+            issueDate: new Date(),
+            status: 'valid',
+          });
+        } catch (err) {
+          console.error(`❌ Compliance upload failed for ${type}:`, err);
+        }
+        continue;
+      }
+
+      if (entry.url || entry.fileName) {
+        results.push({
+          id: `doc-existing-${type}`,
+          name: entry.fileName || `${type}.pdf`,
+          type,
+          url: entry.url || '',
+          storagePath: entry.storagePath,
+          ...(type === 'epc' && entry.epcRating ? { epcRating: entry.epcRating } : {}),
+          issueDate: new Date(),
+          status: 'valid',
+        });
+      } else if (type === 'epc' && entry.epcRating) {
+        // Rating selected without file yet — still store rating metadata via a placeholder doc only if URL exists elsewhere
+      }
+    }
+
+    return results;
   };
 
   // Convert property setup data to Property object
@@ -1322,7 +1544,10 @@ export function AppContent() {
 
     const syncedSetupData = {
       ...propertySetupData,
-      propertyType: wizardData.propertyType,
+      propertyType: wizardData.propertySubtype || wizardData.propertyType,
+      propertyCategory: wizardData.propertyCategory,
+      propertyTypeGroup: wizardData.propertyTypeGroup,
+      propertySubtype: wizardData.propertySubtype,
       propertyDetails: {
         address: wizardData.address,
         monthlyRent: wizardData.monthlyRent,
@@ -1331,30 +1556,35 @@ export function AppContent() {
         squareFootage: wizardData.squareFootage,
         uploadedDocuments: wizardData.uploadedDocuments,
       },
+      description: wizardData.description,
       amenities: wizardData.amenities,
+      amenityDetails: wizardData.amenityDetails,
+      additionalFeatures: wizardData.additionalFeatures,
       images: wizardData.images,
       imageFiles: wizardData.imageFiles,
       additionalNotes: wizardData.additionalNotes,
       status: wizardData.status,
     };
+    setPropertySetupData((prev) => ({ ...prev, ...syncedSetupData }));
 
-    // 1. Upload images
+    // 1. Upload images — soft-fail: still save the property if storage is flaky
     let uploadedPhotos: PropertyPhoto[] = [];
     if (syncedSetupData.imageFiles.length > 0) {
       uploadedPhotos = await uploadPropertyImages(syncedSetupData.imageFiles);
       if (uploadedPhotos.length === 0) {
-        throw new Error(
-          `Image upload failed — none of the ${syncedSetupData.imageFiles.length} photo(s) could be uploaded. ` +
-          `Please check your connection and try again.`
+        console.warn(
+          `Photo upload failed (${syncedSetupData.imageFiles.length} file(s)). Property will be saved without photos — you can add them later.`,
         );
       }
     }
 
-    // 2. Upload documents
-    let uploadedDocuments: PropertyDocument[] = [];
+    // 2. Upload compliance (+ legacy untyped) documents
+    const complianceDocs = await uploadComplianceDocuments(wizardData.complianceDocuments);
+    let legacyDocs: PropertyDocument[] = [];
     if (syncedSetupData.propertyDetails.uploadedDocuments.length > 0) {
-      uploadedDocuments = await uploadPropertyDocuments(syncedSetupData.propertyDetails.uploadedDocuments);
+      legacyDocs = await uploadPropertyDocuments(syncedSetupData.propertyDetails.uploadedDocuments);
     }
+    const uploadedDocuments = [...complianceDocs, ...legacyDocs];
 
     // 3. Build property object
     const bedrooms = parseInt(syncedSetupData.propertyDetails.bedrooms) || 1;
@@ -1362,11 +1592,12 @@ export function AppContent() {
     const squareFootage = parseInt(syncedSetupData.propertyDetails.squareFootage);
     const rent = Math.max(0, parseFloat(String(syncedSetupData.propertyDetails.monthlyRent || '').replace(/[^0-9.]/g, '')) || 0);
     const preservedStatus = syncedSetupData.status || 'vacant';
+    const epcFromCompliance = wizardData.complianceDocuments?.epc?.epcRating || wizardData.epcRating;
 
     const newProperty: Property = {
       id: 'setup-property',
       address: syncedSetupData.propertyDetails.address,
-      type: syncedSetupData.propertyType || 'Property',
+      type: syncedSetupData.propertySubtype || syncedSetupData.propertyType || 'Property',
       bedrooms,
       rent,
       status: preservedStatus,
@@ -1377,6 +1608,8 @@ export function AppContent() {
       createdAt: new Date(),
       ...(isNaN(bathrooms) ? {} : { bathrooms }),
       ...(isNaN(squareFootage) ? {} : { squareFootage }),
+      ...wizardExtrasOntoProperty(wizardData),
+      ...(epcFromCompliance ? { epcRating: epcFromCompliance } : {}),
     } as any;
 
     // 4. Resolve photos (blob: → permanent URL)
@@ -2080,9 +2313,7 @@ export function AppContent() {
               navigateToScreen('property-details');
             }}
             onEditProperty={(property) => {
-              // Use the new single-page EditProperty form instead of the 5-step wizard
-              selectProperty(property);
-              navigateToScreen('edit-property');
+              openEditPropertyWizard(property);
             }}
             onManageDocuments={(property) => {
               handleOpenDocumentsForProperty(property);
@@ -2802,21 +3033,62 @@ export function AppContent() {
             isEditing={isEditing}
             isPublishing={isPublishing}
             isSavingForTenant={isSavingForTenant}
-            initialData={{
-              propertyType: propertySetupData.propertyType || undefined,
-              address: propertySetupData.propertyDetails.address,
-              monthlyRent: propertySetupData.propertyDetails.monthlyRent,
-              bedrooms: propertySetupData.propertyDetails.bedrooms,
-              bathrooms: propertySetupData.propertyDetails.bathrooms,
-              squareFootage: propertySetupData.propertyDetails.squareFootage,
-              uploadedDocuments: propertySetupData.propertyDetails.uploadedDocuments,
-              amenities: propertySetupData.amenities,
-              images: propertySetupData.images,
-              imageFiles: propertySetupData.imageFiles,
-              additionalNotes: propertySetupData.additionalNotes,
-              status: propertySetupData.status,
-            }}
+            initialData={
+              isEditing && selectedProperty
+                ? wizardToInitialData(selectedProperty)
+                : {
+                    ...(propertySetupData.propertySubtype || propertySetupData.propertyType
+                      ? {
+                          propertyType: propertySetupData.propertySubtype || propertySetupData.propertyType,
+                          propertySubtype: propertySetupData.propertySubtype ?? propertySetupData.propertyType,
+                        }
+                      : {}),
+                    ...(propertySetupData.propertyCategory
+                      ? { propertyCategory: propertySetupData.propertyCategory }
+                      : {}),
+                    ...(propertySetupData.propertyTypeGroup
+                      ? { propertyTypeGroup: propertySetupData.propertyTypeGroup }
+                      : {}),
+                    ...(propertySetupData.propertyDetails.address
+                      ? { address: propertySetupData.propertyDetails.address }
+                      : {}),
+                    ...(propertySetupData.propertyDetails.monthlyRent
+                      ? { monthlyRent: propertySetupData.propertyDetails.monthlyRent }
+                      : {}),
+                    ...(propertySetupData.propertyDetails.bedrooms
+                      ? { bedrooms: propertySetupData.propertyDetails.bedrooms }
+                      : {}),
+                    ...(propertySetupData.propertyDetails.bathrooms
+                      ? { bathrooms: propertySetupData.propertyDetails.bathrooms }
+                      : {}),
+                    ...(propertySetupData.propertyDetails.squareFootage
+                      ? { squareFootage: propertySetupData.propertyDetails.squareFootage }
+                      : {}),
+                    uploadedDocuments: propertySetupData.propertyDetails.uploadedDocuments,
+                    ...(propertySetupData.amenities.length
+                      ? { amenities: propertySetupData.amenities }
+                      : {}),
+                    ...(propertySetupData.amenityDetails
+                      ? { amenityDetails: propertySetupData.amenityDetails }
+                      : {}),
+                    ...(propertySetupData.additionalFeatures
+                      ? { additionalFeatures: propertySetupData.additionalFeatures }
+                      : {}),
+                    ...(propertySetupData.description
+                      ? { description: propertySetupData.description }
+                      : {}),
+                    ...(propertySetupData.images.length
+                      ? { images: propertySetupData.images }
+                      : {}),
+                    imageFiles: propertySetupData.imageFiles,
+                    ...(propertySetupData.additionalNotes
+                      ? { additionalNotes: propertySetupData.additionalNotes }
+                      : {}),
+                    ...(propertySetupData.status ? { status: propertySetupData.status } : {}),
+                  }
+            }
             onBulkImport={!isEditing ? () => navigateToScreen('bulk-import-property') : undefined}
+            onVerifyAccount={() => navigateToMainApp('dashboard')}
             onBack={() => {
               setIsEditing(false);
               setEditingPropertyId(null);
@@ -2856,7 +3128,10 @@ export function AppContent() {
                 // Sync wizard data into legacy propertySetupData shape so upload helpers work
                 const syncedSetupData = {
                   ...propertySetupData,
-                  propertyType: wizardData.propertyType,
+                  propertyType: wizardData.propertySubtype || wizardData.propertyType,
+                  propertyCategory: wizardData.propertyCategory,
+                  propertyTypeGroup: wizardData.propertyTypeGroup,
+                  propertySubtype: wizardData.propertySubtype,
                   propertyDetails: {
                     address: wizardData.address,
                     monthlyRent: wizardData.monthlyRent,
@@ -2865,36 +3140,42 @@ export function AppContent() {
                     squareFootage: wizardData.squareFootage,
                     uploadedDocuments: wizardData.uploadedDocuments,
                   },
+                  description: wizardData.description,
                   amenities: wizardData.amenities,
+                  amenityDetails: wizardData.amenityDetails,
+                  additionalFeatures: wizardData.additionalFeatures,
                   images: wizardData.images,
                   imageFiles: wizardData.imageFiles,
                   additionalNotes: wizardData.additionalNotes,
                   status: wizardData.status,
                 };
+                setPropertySetupData((prev) => ({ ...prev, ...syncedSetupData }));
 
-                // 1. Upload images
+                // 1. Upload images — soft-fail so publish is not blocked by storage flakiness
                 let uploadedPhotos: PropertyPhoto[] = [];
                 if (syncedSetupData.imageFiles.length > 0) {
                   uploadedPhotos = await uploadPropertyImages(syncedSetupData.imageFiles);
                   if (uploadedPhotos.length === 0) {
-                    throw new Error(
-                      `Image upload failed — none of the ${syncedSetupData.imageFiles.length} photo(s) could be uploaded. ` +
-                      `Please check your connection and try again.`
+                    console.warn(
+                      `Photo upload failed (${syncedSetupData.imageFiles.length} file(s)). Publishing without photos — add them later from property details.`,
                     );
                   }
                 }
 
-                // 2. Upload documents
-                let uploadedDocuments: PropertyDocument[] = [];
+                // 2. Upload compliance (+ legacy untyped) documents
+                const complianceDocs = await uploadComplianceDocuments(wizardData.complianceDocuments);
+                let legacyDocs: PropertyDocument[] = [];
                 if (syncedSetupData.propertyDetails.uploadedDocuments.length > 0) {
-                  uploadedDocuments = await uploadPropertyDocuments(syncedSetupData.propertyDetails.uploadedDocuments);
+                  legacyDocs = await uploadPropertyDocuments(syncedSetupData.propertyDetails.uploadedDocuments);
                 }
+                const uploadedDocuments = [...complianceDocs, ...legacyDocs];
 
                 // 3. Build property object from wizard data
                 const bedrooms = parseInt(syncedSetupData.propertyDetails.bedrooms) || 1;
                 const bathrooms = parseInt(syncedSetupData.propertyDetails.bathrooms);
                 const squareFootage = parseInt(syncedSetupData.propertyDetails.squareFootage);
                 const rent = Math.max(0, parseFloat(String(syncedSetupData.propertyDetails.monthlyRent || '').replace(/[^0-9.]/g, '')) || 0);
+                const epcFromCompliance = wizardData.complianceDocuments?.epc?.epcRating || wizardData.epcRating;
 
                 const preservedStatus = syncedSetupData.status
                   || (isEditing && selectedProperty ? selectedProperty.status : undefined)
@@ -2903,7 +3184,7 @@ export function AppContent() {
                 const newProperty: Property = {
                   id: 'setup-property',
                   address: syncedSetupData.propertyDetails.address,
-                  type: syncedSetupData.propertyType || 'Property',
+                  type: syncedSetupData.propertySubtype || syncedSetupData.propertyType || 'Property',
                   bedrooms,
                   rent,
                   status: preservedStatus,
@@ -2914,6 +3195,8 @@ export function AppContent() {
                   createdAt: new Date(),
                   ...(isNaN(bathrooms) ? {} : { bathrooms }),
                   ...(isNaN(squareFootage) ? {} : { squareFootage }),
+                  ...wizardExtrasOntoProperty(wizardData),
+                  ...(epcFromCompliance ? { epcRating: epcFromCompliance } : {}),
                 } as any;
 
                 // 4. Resolve photos (blob: → permanent URL)
@@ -2950,12 +3233,12 @@ export function AppContent() {
                 }
                 newProperty.photos = finalPhotos;
 
-                // 5. Resolve documents
-                let finalDocuments: PropertyDocument[] = uploadedDocuments;
-                if (isEditing && selectedProperty?.documents?.length) {
-                  finalDocuments = [...selectedProperty.documents, ...uploadedDocuments];
-                }
-                newProperty.documents = finalDocuments;
+                // 5. Resolve documents — replace compliance types, keep other existing docs
+                const complianceTypeSet = new Set<string>(COMPLIANCE_KEYS);
+                const preservedOther = (isEditing && selectedProperty?.documents?.length)
+                  ? selectedProperty.documents.filter((d) => !complianceTypeSet.has(d.type))
+                  : [];
+                newProperty.documents = [...preservedOther, ...uploadedDocuments];
 
                 if (isEditing && editingPropertyId) {
                   const originalProperty = await propertyService.getProperty(editingPropertyId);
@@ -2969,6 +3252,25 @@ export function AppContent() {
                       rent: newProperty.rent,
                       amenities: newProperty.amenities,
                       notes: newProperty.notes,
+                      description: (newProperty as any).description,
+                      amenityDetails: (newProperty as any).amenityDetails,
+                      additionalFeatures: (newProperty as any).additionalFeatures,
+                      propertyClassification: (newProperty as any).propertyClassification,
+                      receptionRooms: (newProperty as any).receptionRooms,
+                      floorNumber: (newProperty as any).floorNumber,
+                      constructionType: (newProperty as any).constructionType,
+                      tenure: (newProperty as any).tenure,
+                      epcRating: (newProperty as any).epcRating,
+                      propertyUse: (newProperty as any).propertyUse,
+                      numberOfFloors: (newProperty as any).numberOfFloors,
+                      buildingSpecification: (newProperty as any).buildingSpecification,
+                      permittedUse: (newProperty as any).permittedUse,
+                      businessRates: (newProperty as any).businessRates,
+                      landArea: (newProperty as any).landArea,
+                      planningStatus: (newProperty as any).planningStatus,
+                      landAccess: (newProperty as any).landAccess,
+                      landUtilities: (newProperty as any).landUtilities,
+                      boundaries: (newProperty as any).boundaries,
                       status: originalProperty?.status || preservedStatus,
                       photos: newProperty.photos,
                       documents: newProperty.documents,
@@ -2993,6 +3295,42 @@ export function AppContent() {
                   const normAddr = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
                   const dupe = properties.find(p => normAddr(p.address) === normAddr(newProperty.address));
                   if (dupe) throw new Error(`A property at "${newProperty.address}" already exists. Use Edit to update it.`);
+
+                  // C1 soft gate (UI hint) — server still enforces when flag is on
+                  if ((preservedStatus || 'vacant') === 'vacant') {
+                    try {
+                      const flagsRes = await fetch(`${getResolvedApiBaseUrl()}/flags`);
+                      const flags = flagsRes.ok ? await flagsRes.json() : null;
+                      if (flags?.c1_verification_gate) {
+                        const missing: string[] = [];
+                        const verification = await getAccountVerification().catch(() => null);
+                        if (!verification?.photoId?.storagePath) missing.push('photo_id');
+                        if (!verification?.proofOfAddress?.storagePath) missing.push('proof_of_address');
+                        const docs = newProperty.documents || [];
+                        const has = (t: string) => docs.some((d: any) => String(d.type).toLowerCase() === t);
+                        if (!has('gas-cert')) missing.push('gas-cert');
+                        if (!has('eicr')) missing.push('eicr');
+                        if (!docs.some((d: any) => String(d.type).toLowerCase() === 'epc' && String(d.epcRating || '').trim())) {
+                          missing.push('epc');
+                        }
+                        const depositSatisfied =
+                          wizardData.takesDeposit === 'no' ||
+                          (wizardData.takesDeposit === 'yes' &&
+                            Boolean(wizardData.depositProtectionConfirmed) &&
+                            Number(wizardData.depositAmount) > 0) ||
+                          has('deposit-protection');
+                        if (!depositSatisfied) missing.push('deposit-protection');
+                        if (missing.length) {
+                          throw new Error(
+                            `Cannot publish yet. Submit: ${formatMissingVerification(missing)}. You can still save as draft.`,
+                          );
+                        }
+                      }
+                    } catch (gateErr: any) {
+                      if (String(gateErr?.message || '').includes('Cannot publish yet')) throw gateErr;
+                      // Flag/verification lookup failed — let the API enforce
+                    }
+                  }
 
                   const propertyId = await addProperty(newProperty);
 
@@ -3172,9 +3510,7 @@ export function AppContent() {
             onDeleteProperty={deleteProperty}
             onArchiveProperty={archiveProperty}
             onEdit={(property) => {
-              // Enter editing mode with the new single-page EditProperty form
-              setSelectedProperty(property);
-              navigateToScreen('edit-property');
+              openEditPropertyWizard(property);
             }}
             onManageDocuments={() => {
               if (selectedProperty) {
@@ -3407,34 +3743,17 @@ export function AppContent() {
         return null;
 
       case 'edit-property':
+        // Legacy single-page editor — redirect into the Add Property wizard in edit mode
         if (!selectedProperty) {
           navigateToMainApp('properties');
           return null;
         }
-        return (
-          <EditProperty
-            property={selectedProperty}
-            userProfile={userProfile}
-            onSave={async (updates) => {
-              await updateProperty(selectedProperty.id, updates as any);
-              // Fetch the updated property from the DB so local state is accurate
-              const refreshed = await propertyService.getProperty(selectedProperty.id);
-              if (refreshed) {
-                const tenantForProperty = tenants.find(
-                  t => t.propertyId === selectedProperty.id || t.id === refreshed.tenantId
-                );
-                const enriched = {
-                  ...refreshed,
-                  tenant: tenantForProperty || refreshed.tenant,
-                  tenantId: tenantForProperty?.id || refreshed.tenantId,
-                };
-                setSelectedProperty(enriched);
-                setProperties(prev => prev.map(p => p.id === enriched.id ? enriched : p));
-              }
-            }}
-            onBack={() => navigateToScreen('property-details')}
-          />
-        );
+        if (!isEditing || editingPropertyId !== selectedProperty.id) {
+          openEditPropertyWizard(selectedProperty);
+        } else {
+          navigateToScreen('property-setup-step1');
+        }
+        return null;
 
       // COMMENTED OUT FOR THIS RELEASE - Insights pages not in scope
       // case 'portfolio-insights':
@@ -3500,7 +3819,7 @@ export function AppContent() {
 
 
       case 'property-preview':
-        // Redirect: the new AddPropertyWizard handles preview inline (Step 5).
+        // Redirect: the new AddPropertyWizard handles preview inline (Step 6).
         // This case can be reached from sessionStorage restore — send to wizard.
         navigateToScreen('property-setup-step1');
         return null;
@@ -3577,8 +3896,14 @@ export function AppContent() {
               if (previousScreen === 'add-tenant-from-wizard') {
                 setPropertySetupData({
                   propertyType: null,
+                  propertyCategory: null,
+                  propertyTypeGroup: null,
+                  propertySubtype: null,
                   propertyDetails: { address: '', monthlyRent: '', bedrooms: '', bathrooms: '', squareFootage: '', uploadedDocuments: [] },
+                  description: '',
                   amenities: [],
+                  amenityDetails: [],
+                  additionalFeatures: '',
                   images: [],
                   imageFiles: [],
                   additionalNotes: '',
@@ -3772,8 +4097,7 @@ export function AppContent() {
               handleOpenDocumentsForProperty(property);
             }}
             onEditDetails={(property) => {
-              selectProperty(property);
-              navigateToScreen('edit-property');
+              openEditPropertyWizard(property);
             }}
             onViewProperty={(property) => {
               selectProperty(property);

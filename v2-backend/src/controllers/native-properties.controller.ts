@@ -1,10 +1,34 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { NativePropertiesService } from '../services/native-properties.service';
+import { ReadyToPublishService } from '../services/ready-to-publish.service';
 import { FirebaseAuthGuard } from '../guards/firebase-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
 import { CreatePropertyDto, UpdatePropertyDto } from '../dto/property.dto';
+import { validateAmenityIds, getAmenityById } from '../config/propertyCatalogue';
+
+/** Soft-validate amenity ids against the catalogue; drop unknown ids when a subtype is known. */
+function sanitizePropertyAmenities<T extends { amenities?: string[]; propertyClassification?: { subtypeId?: string }; type?: any; propertyType?: string }>(
+  body: T,
+): T {
+  if (!Array.isArray(body.amenities) || body.amenities.length === 0) return body;
+
+  const subtypeId =
+    body.propertyClassification?.subtypeId ||
+    (typeof body.type === 'string' ? body.type : undefined) ||
+    body.propertyType;
+
+  // Always drop completely unknown ids (not in catalogue / legacy map)
+  const known = body.amenities.filter((id) => Boolean(getAmenityById(id)));
+  if (!subtypeId) {
+    return { ...body, amenities: known };
+  }
+
+  const { valid } = validateAmenityIds(known, subtypeId);
+  // Backward compatible: if validation would wipe a legacy listing's amenities, keep known ones
+  return { ...body, amenities: valid.length > 0 ? valid : known };
+}
 
 function normaliseForSearch(doc: any): Record<string, any> {
   const locationParts = [doc.address, doc.city, doc.postcode].filter(Boolean);
@@ -47,7 +71,11 @@ function normaliseForSearch(doc: any): Record<string, any> {
     bathrooms: (doc.bathrooms ?? doc.bathroom_count ?? doc.bathroomCount) !== undefined ? Number(doc.bathrooms ?? doc.bathroom_count ?? doc.bathroomCount) : undefined,
     bathroom_count: (doc.bathrooms ?? doc.bathroom_count ?? doc.bathroomCount) !== undefined ? Number(doc.bathrooms ?? doc.bathroom_count ?? doc.bathroomCount) : undefined,
     propertyType,
-    description: doc.notes ?? doc.description ?? '',
+    description: doc.description ?? doc.notes ?? '',
+    notes: doc.notes ?? '',
+    propertyClassification: doc.propertyClassification ?? undefined,
+    amenityDetails: Array.isArray(doc.amenityDetails) ? doc.amenityDetails : undefined,
+    additionalFeatures: doc.additionalFeatures ?? undefined,
     squareFootage: (doc.squareFootage ?? doc.sq_ft ?? doc.sqft ?? doc.square_footage) ? String(doc.squareFootage ?? doc.sq_ft ?? doc.sqft ?? doc.square_footage) : undefined,
     sq_ft: (doc.squareFootage ?? doc.sq_ft ?? doc.sqft ?? doc.square_footage) ? Number(String(doc.squareFootage ?? doc.sq_ft ?? doc.sqft ?? doc.square_footage).replace(/[^0-9]/g, '')) : undefined,
     amenities: Array.isArray(doc.amenities) ? doc.amenities : [],
@@ -75,7 +103,10 @@ function normaliseForSearch(doc: any): Record<string, any> {
 @ApiTags('Properties')
 @Controller(['native-properties', 'properties'])
 export class NativePropertiesController {
-  constructor(private readonly propertiesService: NativePropertiesService) {}
+  constructor(
+    private readonly propertiesService: NativePropertiesService,
+    private readonly readyToPublish: ReadyToPublishService,
+  ) {}
 
   @Get('search')
   @ApiOperation({ summary: 'Public property search across native catalog with cursor pagination' })
@@ -113,6 +144,31 @@ export class NativePropertiesController {
     return await this.propertiesService.findAllByUser(userId, email);
   }
 
+  @Get(':id/ready-to-publish')
+  @UseGuards(FirebaseAuthGuard, RolesGuard)
+  @Roles('landlord', 'agent', 'homeowner')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'C1 shared ready-to-publish check for a property' })
+  @ApiParam({ name: 'id', description: 'Property ID' })
+  @ApiResponse({ status: 200, description: '{ ok, missing[], gateEnabled }' })
+  async readyToPublishCheck(@Req() req: any, @Param('id') id: string) {
+    const property = await this.propertiesService.findById(id);
+    if (!property) {
+      throw new NotFoundException('Property not found');
+    }
+    const landlordId = (property as any).landlordId || (property as any).userId;
+    const uid = req.user?.uid;
+    const email = (req.user?.email || '').toLowerCase().trim();
+    const owns =
+      landlordId === uid ||
+      String((property as any).ownerEmail || '').toLowerCase() === email ||
+      String((property as any).userId || '') === uid;
+    if (!owns) {
+      throw new ForbiddenException('Not allowed to check readiness for this property');
+    }
+    return this.readyToPublish.check(uid, id, (property as any).documents);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get single native property by ID' })
   @ApiParam({ name: 'id', description: 'Property ID' })
@@ -137,8 +193,19 @@ export class NativePropertiesController {
   async create(@Req() req: any, @Body() body: CreatePropertyDto) {
     const email = req.user?.email || '';
     const userId = req.user?.uid;
+    const sanitized = sanitizePropertyAmenities(body);
+    if (Array.isArray(body.amenities) && body.amenities.length > 0) {
+      const dropped = body.amenities.filter((id) => !(sanitized.amenities || []).includes(id));
+      // Unknown amenity ids are rejected when every submitted id is invalid
+      if (dropped.length === body.amenities.length && body.amenities.length > 0) {
+        throw new BadRequestException({
+          message: 'None of the submitted amenity ids are recognised',
+          invalid: dropped,
+        });
+      }
+    }
     return await this.propertiesService.create({
-      ...body,
+      ...sanitized,
       userId,
       ownerEmail: email.toLowerCase().trim(),
       landlordId: userId,
@@ -199,7 +266,8 @@ export class NativePropertiesController {
   async update(@Req() req: any, @Param('id') id: string, @Body() body: UpdatePropertyDto) {
     const userId = req.user?.uid;
     const userEmail = (req.user?.email || '').toLowerCase().trim();
-    return await this.propertiesService.update(id, userId, userEmail, body);
+    const sanitized = sanitizePropertyAmenities(body);
+    return await this.propertiesService.update(id, userId, userEmail, sanitized);
   }
 
   @Delete(':id')

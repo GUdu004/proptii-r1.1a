@@ -39,11 +39,23 @@ export interface PropertyPhoto {
 export interface PropertyDocument {
   id: string;
   name: string;
-  type: 'epc' | 'gas-cert' | 'tenancy-agreement' | 'insurance' | 'other';
+  type:
+    | 'epc'
+    | 'gas-cert'
+    | 'eicr'
+    | 'deposit-protection'
+    | 'tenancy-agreement'
+    | 'insurance'
+    | 'other';
   url: string;
+  /** Private storage path for authenticated download (C1) */
+  storagePath?: string;
+  /** Required for EPC when C1 gate is on */
+  epcRating?: string;
   issueDate: Date;
   expiryDate?: Date;
   status: 'valid' | 'expiring-soon' | 'expired';
+  submittedAt?: Date | string;
 }
 
 export interface Tenant {
@@ -74,6 +86,19 @@ export interface Tenant {
   overdueAmount?: number;
 }
 
+export interface PropertyAmenityDetail {
+  amenityId: string;
+  accessType?: 'private' | 'shared' | 'communal';
+  additionalCost?: boolean;
+  notes?: string;
+}
+
+export interface PropertyClassification {
+  categoryId: string;
+  typeGroupId: string;
+  subtypeId: string;
+}
+
 export interface Property {
   id: string;
   address: string;
@@ -85,8 +110,34 @@ export interface Property {
   status: 'vacant' | 'occupied' | 'under-renovation' | 'draft' | 'archived';
   amenities: string[];
   notes: string;
+  /** Public listing description shown to renters/buyers */
+  description?: string;
+  propertyClassification?: PropertyClassification;
+  amenityDetails?: PropertyAmenityDetail[];
+  additionalFeatures?: string;
+  // Optional catalogue detail fields
+  receptionRooms?: number | string;
+  floorNumber?: string;
+  constructionType?: string;
+  tenure?: string;
+  epcRating?: string;
+  propertyUse?: string;
+  numberOfFloors?: number | string;
+  buildingSpecification?: string;
+  permittedUse?: string;
+  businessRates?: number | string;
+  landArea?: string;
+  planningStatus?: string;
+  landAccess?: string;
+  landUtilities?: string;
+  boundaries?: string;
   photos: PropertyPhoto[];
   documents: PropertyDocument[];
+  /** Listing-time deposit commitment (not a certificate upload) */
+  takesDeposit?: 'yes' | 'no' | null;
+  depositAmount?: number | string;
+  depositProtectionConfirmed?: boolean;
+  depositProtectedBy?: 'landlord' | 'agent' | null;
   isForSale?: boolean;
   tenureType?: string;
   annualGroundRent?: number;
@@ -254,6 +305,9 @@ export type Screen =
 
 export interface PropertySetupData {
   propertyType: string | null;
+  propertyCategory?: 'residential' | 'commercial' | 'land' | null;
+  propertyTypeGroup?: string | null;
+  propertySubtype?: string | null;
   propertyDetails: {
     address: string;
     monthlyRent: string;
@@ -262,10 +316,13 @@ export interface PropertySetupData {
     squareFootage: string;
     uploadedDocuments: File[];
   };
+  description?: string;
   amenities: string[];
+  amenityDetails?: PropertyAmenityDetail[];
+  additionalFeatures?: string;
   images: string[];
   imageFiles: File[];
   additionalNotes: string;
-  status?: 'vacant' | 'occupied' | 'under-renovation';
+  status?: 'vacant' | 'occupied' | 'under-renovation' | 'draft';
   pendingTenants?: Omit<Tenant, 'id'>[];
 }

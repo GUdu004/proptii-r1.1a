@@ -60,6 +60,9 @@ import {
   Loader2,
   Download,
   Trash2,
+  ShieldCheck,
+  Info,
+  Check,
 } from "lucide-react";
 import { Property, PropertyPhoto, Tenant, PropertyDocument } from "../App";
 import { isPropertyArchived } from "../utils/portfolioStats";
@@ -89,24 +92,45 @@ import {
 } from "./ui/dialog";
 import { getResolvedApiBaseUrl } from "../../../config/apiBaseUrl";
 import { getAccessTokenForApiRequest } from "../../../services/msalAccessToken";
+import {
+  getAmenityById,
+  getAmenityLabel,
+  getAmenitiesGroupedForSubtype,
+  subtypeLabel,
+  resolveClassificationFromStoredType,
+} from "../../../shared/propertyCatalogue";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const PROPERTY_TYPE_LABELS: Record<string, string> = {
-  house: "House",
-  flat: "Flat / Apartment",
-  studio: "Studio",
-  shared: "Room (Shared House)",
-  commercial: "Commercial",
-  other: "Other",
-};
-
 function fmtType(type?: string | null): string {
   if (!type) return "—";
-  return (
-    PROPERTY_TYPE_LABELS[type.toLowerCase()] ??
-    type.charAt(0).toUpperCase() + type.slice(1)
-  );
+  return subtypeLabel(type);
+}
+
+function groupAmenitiesForDisplay(amenities: string[], type?: string | null) {
+  const classification = type ? resolveClassificationFromStoredType(type) : null;
+  const subtypeId = classification?.subtypeId;
+  if (subtypeId) {
+    const grouped = getAmenitiesGroupedForSubtype(subtypeId, { includeLegacy: true });
+    const selected = new Set(amenities);
+    return grouped
+      .map((g) => ({
+        categoryLabel: g.category.label,
+        items: g.amenities
+          .filter((a) => selected.has(a.id) || amenities.some((id) => getAmenityById(id)?.id === a.id))
+          .map((a) => a.label),
+      }))
+      .filter((g) => g.items.length > 0);
+  }
+
+  // Fallback: single uncategorised list with friendly labels
+  if (!amenities.length) return [];
+  return [
+    {
+      categoryLabel: "Features",
+      items: amenities.map((id) => getAmenityLabel(id)),
+    },
+  ];
 }
 
 function toDate(v: any): Date | null {
@@ -198,10 +222,37 @@ function StatusPill({ status }: { status: Property["status"] }) {
 const DOC_TYPE_LABELS: Record<string, string> = {
   epc: "EPC Certificate",
   "gas-cert": "Gas Safety Certificate",
+  eicr: "Electrical Installation Condition Report (EICR)",
+  "deposit-protection": "Deposit protection",
   "tenancy-agreement": "Tenancy Agreement",
   insurance: "Insurance Policy",
   other: "Other",
 };
+
+const COMPLIANCE_UPLOAD_ITEMS: Array<{
+  key: "gas-cert" | "eicr" | "epc";
+  title: string;
+  description: string;
+}> = [
+  {
+    key: "gas-cert",
+    title: "Gas Safety Certificate (CP12)",
+    description: "Legally required annual check confirming gas appliances are safe.",
+  },
+  {
+    key: "eicr",
+    title: "Electrical Installation Condition Report (EICR)",
+    description: "Confirms the property's electrical installations meet UK safety standards.",
+  },
+  {
+    key: "epc",
+    title: "Energy Performance Certificate (EPC)",
+    description: "Shows the property's energy efficiency rating as required by UK law.",
+  },
+];
+
+const EPC_RATINGS = ["A", "B", "C", "D", "E", "F", "G", "Exempt"];
+const COMPLIANCE_DOC_TYPES = new Set(["gas-cert", "eicr", "epc", "deposit-protection"]);
 
 function DocStatusIcon({ status }: { status: string }) {
   if (status === "valid")
@@ -321,6 +372,9 @@ export function PropertyDetails({
   const [isUploadingDoc,  setIsUploadingDoc]    = useState(false);
   const [docUploadError,  setDocUploadError]    = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc]           = useState<PropertyDocument | null>(null);
+  const [complianceUploadError, setComplianceUploadError] = useState<string | null>(null);
+  const [uploadingComplianceKey, setUploadingComplianceKey] = useState<string | null>(null);
+  const complianceInputRefs = useRef<Partial<Record<"gas-cert" | "eicr" | "epc", HTMLInputElement | null>>>({});
 
   async function handleDocUpload(doc: { name: string; type: string; file: File; expiryDate?: string }) {
     if (!property || !onDocumentUpload) return;
@@ -334,6 +388,43 @@ export function PropertyDetails({
     } finally {
       setIsUploadingDoc(false);
     }
+  }
+
+  function latestDocOfType(type: string): PropertyDocument | undefined {
+    const docs = (property?.documents ?? []).filter((d) => d.type === type);
+    if (!docs.length) return undefined;
+    return docs[docs.length - 1];
+  }
+
+  async function handleComplianceFile(
+    key: "gas-cert" | "eicr" | "epc",
+    file: File | undefined,
+  ) {
+    if (!property || !onDocumentUpload || !file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setComplianceUploadError(`${file.name} exceeds the 10 MB limit.`);
+      return;
+    }
+    setComplianceUploadError(null);
+    setUploadingComplianceKey(key);
+    try {
+      await onDocumentUpload(property.id, {
+        name: file.name.replace(/\.[^/.]+$/, "") || DOC_TYPE_LABELS[key] || key,
+        type: key,
+        file,
+      });
+    } catch (err: any) {
+      setComplianceUploadError(err?.message || "Upload failed. Please try again.");
+    } finally {
+      setUploadingComplianceKey(null);
+    }
+  }
+
+  function patchDeposit(
+    patch: Partial<Pick<Property, "takesDeposit" | "depositAmount" | "depositProtectionConfirmed" | "depositProtectedBy">>,
+  ) {
+    if (!property) return;
+    updateProperty(property.id, patch);
   }
 
   // Sync photos from prop whenever property changes (not during unsaved edits)
@@ -550,18 +641,19 @@ export function PropertyDetails({
           borderBottom: "1px solid rgba(226,232,240,0.8)",
         }}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
             type="button"
             onClick={onBack}
-            className="w-8 h-8 rounded-full border border-[#e2e8f0] bg-white flex items-center justify-center text-[#64748b] hover:bg-[#f1f5f9] transition-all"
+            className="w-8 h-8 rounded-full border border-[#e2e8f0] bg-white flex items-center justify-center text-[#64748b] hover:bg-[#f1f5f9] transition-all shrink-0"
           >
             <ArrowLeft size={15} strokeWidth={2.5} />
           </button>
-          <div>
+          <div className="min-w-0">
             <p
-              className="text-[14px] font-bold text-[#1e293b] leading-tight"
+              className="text-[14px] font-bold text-[#1e293b] leading-tight truncate"
               style={{ fontFamily: "Archivo,sans-serif" }}
+              title={property.address}
             >
               {property.address}
             </p>
@@ -618,6 +710,22 @@ export function PropertyDetails({
               >
                 <Clock size={14} className="mr-2 text-[#64748b]" /> Mark as Renovation
               </DropdownMenuItem>
+              {(property.status as string) !== 'draft' && (
+                <DropdownMenuItem
+                  className="rounded-[10px] cursor-pointer text-[13px]"
+                  onSelect={() => updateProperty(property.id, { status: 'draft' as any })}
+                >
+                  <FileText size={14} className="mr-2 text-[#64748b]" /> Mark as Draft
+                </DropdownMenuItem>
+              )}
+              {(property.status as string) === 'draft' && (
+                <DropdownMenuItem
+                  className="rounded-[10px] cursor-pointer text-[13px]"
+                  onSelect={() => updateProperty(property.id, { status: 'vacant' as any })}
+                >
+                  <CheckCircle size={14} className="mr-2 text-[#64748b]" /> Mark as Vacant
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 className="rounded-[10px] cursor-pointer text-[13px]"
                 onSelect={() => {
@@ -805,130 +913,450 @@ export function PropertyDetails({
 
             {/* ── Details tab ─────────────────────────────────────────────── */}
             {activeTab === "overview" && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Basic Information */}
-                  <SCard className="px-5 py-5">
-                    <p className="text-[11px] uppercase font-bold tracking-wider text-[#94a3b8] mb-4" style={{ fontFamily: "Archivo,sans-serif" }}>
-                      Basic Information
-                    </p>
-                    <ul className="space-y-3">
-                      <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
-                        <MapPin size={14} className="text-[#94a3b8] shrink-0" />
-                        <span className="truncate">{property.address}</span>
-                      </li>
-                      <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
-                        <BedDouble size={14} className="text-[#94a3b8] shrink-0" />
-                        {property.bedrooms} bedroom{property.bedrooms !== 1 ? "s" : ""}
-                      </li>
-                      <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
-                        <Bath size={14} className="text-[#94a3b8] shrink-0" />
-                        {typeof (property as any).bathrooms === "number"
-                          ? `${(property as any).bathrooms} bathroom${(property as any).bathrooms !== 1 ? "s" : ""}`
-                          : "—"}
-                      </li>
-                      <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
-                        <Maximize2 size={14} className="text-[#94a3b8] shrink-0" />
-                        {typeof (property as any).squareFootage === "number"
-                          ? `${(property as any).squareFootage} sq ft`
-                          : "—"}
-                      </li>
-                      <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
-                        <PoundSterling size={14} className="text-[#94a3b8] shrink-0" />
-                        £{(property.rent ?? 0).toLocaleString()} per month
-                      </li>
-                      <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
-                        <Calendar size={14} className="text-[#94a3b8] shrink-0" />
-                        Added {dates.createdAt}
-                      </li>
-                    </ul>
-                  </SCard>
+              <div className="space-y-4 min-w-0">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start min-w-0">
+                  {/* Left: Basic Information (top) + Description (under) */}
+                  <div className="space-y-4 min-w-0">
+                    <SCard className="px-5 py-5 min-w-0 overflow-hidden">
+                      <p className="text-[11px] uppercase font-bold tracking-wider text-[#94a3b8] mb-4" style={{ fontFamily: "Archivo,sans-serif" }}>
+                        Basic Information
+                      </p>
+                      <ul className="space-y-3">
+                        <li className="flex items-start gap-2.5 text-[13px] text-[#475569] min-w-0">
+                          <MapPin size={14} className="text-[#94a3b8] shrink-0 mt-0.5" />
+                          <span className="min-w-0 break-words" style={{ overflowWrap: "anywhere" }}>
+                            {property.address}
+                          </span>
+                        </li>
+                        <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
+                          <BedDouble size={14} className="text-[#94a3b8] shrink-0" />
+                          {property.bedrooms} bedroom{property.bedrooms !== 1 ? "s" : ""}
+                        </li>
+                        <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
+                          <Bath size={14} className="text-[#94a3b8] shrink-0" />
+                          {typeof (property as any).bathrooms === "number"
+                            ? `${(property as any).bathrooms} bathroom${(property as any).bathrooms !== 1 ? "s" : ""}`
+                            : "—"}
+                        </li>
+                        <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
+                          <Maximize2 size={14} className="text-[#94a3b8] shrink-0" />
+                          {typeof (property as any).squareFootage === "number"
+                            ? `${(property as any).squareFootage} sq ft`
+                            : "—"}
+                        </li>
+                        <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
+                          <PoundSterling size={14} className="text-[#94a3b8] shrink-0" />
+                          £{(property.rent ?? 0).toLocaleString()} per month
+                        </li>
+                        <li className="flex items-center gap-2.5 text-[13px] text-[#475569]">
+                          <Calendar size={14} className="text-[#94a3b8] shrink-0" />
+                          Added {dates.createdAt}
+                        </li>
+                      </ul>
+                    </SCard>
 
-                  {/* Amenities + Notes */}
-                  <div className="space-y-4">
-                    {(property.amenities ?? []).length > 0 && (
-                      <SCard className="px-5 py-5">
-                        <p className="text-[11px] uppercase font-bold tracking-wider text-[#94a3b8] mb-3" style={{ fontFamily: "Archivo,sans-serif" }}>
-                          Amenities
+                    {property.description && (
+                      <SCard className="px-5 py-5 min-w-0 overflow-hidden">
+                        <p className="text-[11px] uppercase font-bold tracking-wider text-[#94a3b8] mb-2" style={{ fontFamily: "Archivo,sans-serif" }}>
+                          Description
                         </p>
-                        <div className="flex flex-wrap gap-2">
-                          {property.amenities.map((a) => (
-                            <span
-                              key={a}
-                              className="text-[12px] font-semibold px-3 py-1 rounded-full capitalize"
-                              style={{ background: "#eaf3f8", color: "#136C9E", border: "1px solid rgba(19,108,158,0.15)" }}
-                            >
-                              {a.replace(/-/g, " ")}
-                            </span>
-                          ))}
-                        </div>
+                        <p
+                          className="text-[13.5px] text-[#475569] leading-relaxed whitespace-pre-wrap break-words"
+                          style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
+                        >
+                          {property.description}
+                        </p>
                       </SCard>
                     )}
+
                     {property.notes && (
-                      <SCard className="px-5 py-5">
+                      <SCard className="px-5 py-5 min-w-0 overflow-hidden">
                         <p className="text-[11px] uppercase font-bold tracking-wider text-[#94a3b8] mb-2" style={{ fontFamily: "Archivo,sans-serif" }}>
                           Notes
                         </p>
-                        <p className="text-[13.5px] text-[#475569] leading-relaxed">{property.notes}</p>
+                        <p
+                          className="text-[13.5px] text-[#475569] leading-relaxed whitespace-pre-wrap break-words"
+                          style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
+                        >
+                          {property.notes}
+                        </p>
                       </SCard>
                     )}
                   </div>
+
+                  {/* Right: Property Features beside Basic Info + Description */}
+                  {(property.amenities ?? []).length > 0 && (
+                    <SCard className="px-5 py-5 min-w-0 overflow-hidden lg:sticky lg:top-[88px]">
+                      <p className="text-[11px] uppercase font-bold tracking-wider text-[#94a3b8] mb-3" style={{ fontFamily: "Archivo,sans-serif" }}>
+                        Property Features
+                      </p>
+                      <div className="space-y-4">
+                        {groupAmenitiesForDisplay(property.amenities, property.type).map((group) => (
+                          <div key={group.categoryLabel} className="min-w-0">
+                            <p className="text-[12px] font-bold text-[#334155] mb-2" style={{ fontFamily: "Archivo,sans-serif" }}>
+                              {group.categoryLabel}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {group.items.map((label) => (
+                                <span
+                                  key={`${group.categoryLabel}-${label}`}
+                                  className="text-[12px] font-semibold px-3 py-1 rounded-full max-w-full break-words"
+                                  style={{
+                                    background: "#eaf3f8",
+                                    color: "#136C9E",
+                                    border: "1px solid rgba(19,108,158,0.15)",
+                                    overflowWrap: "anywhere",
+                                  }}
+                                >
+                                  {label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {property.additionalFeatures && (
+                        <p
+                          className="text-[12.5px] text-[#64748b] mt-4 leading-relaxed break-words"
+                          style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
+                        >
+                          <span className="font-semibold text-[#334155]">Additional features: </span>
+                          {property.additionalFeatures}
+                        </p>
+                      )}
+                    </SCard>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* ── Documents tab ────────────────────────────────────────────── */}
+            {/* ── Documents tab — Add Property compliance layout ─────────── */}
             {activeTab === "documents" && (
-              <SCard>
-                <div className="flex items-center justify-between px-5 pt-5 pb-4" style={{ borderBottom: "1px solid #f1f5f9" }}>
-                  <p className="text-[14px] font-bold text-[#1e293b]" style={{ fontFamily: "Archivo,sans-serif" }}>
-                    Property Documents
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setIsDocUploadOpen(true)}
-                    className="flex items-center gap-1.5 text-[12.5px] font-semibold px-3.5 py-2 rounded-[10px] transition-all hover:bg-[#eaf3f8]"
-                    style={{ color: "#136C9E", fontFamily: "Archivo,sans-serif" }}
-                  >
-                    <Plus size={14} /> Upload Document
-                  </button>
+              <div className="space-y-4">
+                {complianceUploadError && (
+                  <div className="flex items-start gap-2 p-3 rounded-xl border border-red-200 bg-red-50">
+                    <AlertTriangle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-[12.5px] text-red-700">{complianceUploadError}</p>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  {COMPLIANCE_UPLOAD_ITEMS.map((item) => {
+                    const entry = latestDocOfType(item.key);
+                    const uploaded = Boolean(entry);
+                    const uploading = uploadingComplianceKey === item.key;
+                    return (
+                      <div
+                        key={item.key}
+                        className="rounded-[18px] border border-[#e2e8f0] bg-white px-4 py-4 sm:px-5"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4">
+                          <div className="flex-1 min-w-0">
+                            <span
+                              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10.5px] font-bold uppercase tracking-wide"
+                              style={{
+                                background: uploaded ? "#ecfdf5" : "#f1f5f9",
+                                color: uploaded ? "#047857" : "#64748b",
+                                fontFamily: "Archivo,sans-serif",
+                              }}
+                            >
+                              {uploaded ? "Uploaded" : "Missing"}
+                            </span>
+                            <p
+                              className="text-[14.5px] font-bold text-[#1e293b] mt-2"
+                              style={{ fontFamily: "Archivo,sans-serif" }}
+                            >
+                              {item.title}
+                            </p>
+                            <p className="text-[12.5px] text-[#64748b] mt-1 leading-relaxed">
+                              {item.description}
+                            </p>
+                            <p className="text-[11.5px] text-[#94a3b8] mt-2">
+                              PDF, JPG, or PNG · Max 10 MB
+                            </p>
+                            {uploaded && entry && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedDoc(entry)}
+                                className="mt-2.5 flex items-center gap-2 min-w-0 text-left hover:opacity-80"
+                              >
+                                <FileText size={14} className="text-[#136C9E] shrink-0" />
+                                <span className="text-[12.5px] text-[#334155] truncate underline-offset-2 hover:underline">
+                                  {entry.name || "Document on file"}
+                                </span>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 sm:pt-1">
+                            {item.key === "epc" && (
+                              <select
+                                value={entry?.epcRating || property.epcRating || ""}
+                                onChange={(e) => {
+                                  const rating = e.target.value;
+                                  updateProperty(property.id, { epcRating: rating });
+                                }}
+                                className="h-10 min-w-[132px] rounded-xl border border-[#e2e8f0] bg-white px-3 text-[12.5px] text-[#1e293b] outline-none focus:border-[#136C9E]"
+                                style={{ fontFamily: "Archivo,sans-serif" }}
+                              >
+                                <option value="">Select rating</option>
+                                {EPC_RATINGS.map((r) => (
+                                  <option key={r} value={r}>{r}</option>
+                                ))}
+                              </select>
+                            )}
+                            <input
+                              ref={(el) => {
+                                complianceInputRefs.current[item.key] = el;
+                              }}
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                              className="hidden"
+                              onChange={(e) => {
+                                void handleComplianceFile(item.key, e.target.files?.[0]);
+                                e.target.value = "";
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={!onDocumentUpload || uploading}
+                              onClick={() => complianceInputRefs.current[item.key]?.click()}
+                              className="h-10 px-4 rounded-xl font-semibold text-[13px] text-white flex items-center gap-1.5 transition-all hover:-translate-y-px disabled:opacity-50"
+                              style={{
+                                background: "#0f3d5c",
+                                fontFamily: "Archivo,sans-serif",
+                                boxShadow: "0 2px 8px rgba(15,61,92,0.2)",
+                              }}
+                            >
+                              {uploading ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : (
+                                <Upload size={14} strokeWidth={2.5} />
+                              )}
+                              {uploaded ? "Replace" : "Upload"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                {(property.documents ?? []).length === 0 ? (
-                  <div className="flex flex-col items-center py-12 text-center px-5">
-                    <div className="w-14 h-14 rounded-[16px] flex items-center justify-center mb-4" style={{ background: "#f1f5f9" }}>
-                      <FileText size={24} className="text-[#94a3b8]" />
+
+                {/* Deposit commitment — same layout as Add Property Step 5 */}
+                <div className="rounded-[18px] border border-[#e2e8f0] bg-white px-4 py-5 sm:px-5 space-y-4">
+                  <p className="text-[11.5px] font-semibold uppercase tracking-[0.07em] text-[#64748b] flex items-center gap-2.5 m-0">
+                    Deposit
+                    <span className="flex-1 h-px bg-[#e3e8ef]" />
+                  </p>
+
+                  <div>
+                    <label
+                      className="block text-[13.5px] font-semibold text-[#1e293b] mb-2"
+                      style={{ fontFamily: "Archivo,sans-serif" }}
+                    >
+                      Will you take a deposit? <span className="text-[#e5484d]">*</span>
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {(["yes", "no"] as const).map((opt) => {
+                        const on = property.takesDeposit === opt;
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() =>
+                              patchDeposit(
+                                opt === "no"
+                                  ? {
+                                      takesDeposit: "no",
+                                      depositAmount: "",
+                                      depositProtectionConfirmed: false,
+                                      depositProtectedBy: null,
+                                    }
+                                  : {
+                                      takesDeposit: "yes",
+                                      depositProtectionConfirmed: false,
+                                    },
+                              )
+                            }
+                            className="inline-flex items-center gap-1.5 rounded-full border-[1.5px] px-4 py-2 text-[13.5px] font-medium capitalize"
+                            style={{
+                              borderColor: on ? "#136C9E" : "#d5dde7",
+                              background: on ? "#136C9E" : "#fff",
+                              color: on ? "#fff" : "#1e293b",
+                              fontFamily: "Archivo,sans-serif",
+                            }}
+                          >
+                            {on && <Check size={14} strokeWidth={3} />}
+                            {opt}
+                          </button>
+                        );
+                      })}
                     </div>
-                    <p className="text-[14px] font-semibold text-[#1e293b] mb-1">No documents yet</p>
-                    <p className="text-[13px] text-[#64748b] mb-4">
-                      Upload EPC certificates, gas safety checks and tenancy agreements.
+                  </div>
+
+                  {property.takesDeposit === "yes" && (
+                    <>
+                      <div>
+                        <label
+                          className="block text-[13.5px] font-semibold text-[#1e293b] mb-2"
+                          style={{ fontFamily: "Archivo,sans-serif" }}
+                        >
+                          Deposit amount (£) <span className="text-[#e5484d]">*</span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8a99ad] text-[14.5px]">
+                            £
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            defaultValue={property.depositAmount != null ? String(property.depositAmount) : ""}
+                            key={`deposit-amt-${property.id}-${property.depositAmount ?? ""}`}
+                            onBlur={(e) => patchDeposit({ depositAmount: e.target.value })}
+                            placeholder="e.g. 1500"
+                            className="w-full h-12 bg-white border border-[#e2e8f0] rounded-2xl pl-9 pr-4 text-[14px] text-[#1e293b] outline-none focus:border-[#136C9E] focus:ring-[3.5px] focus:ring-[rgba(19,108,158,0.12)]"
+                          />
+                        </div>
+                        <p className="mt-2 flex items-start gap-1.5 text-[12.5px] text-[#64748b] leading-snug">
+                          <Info size={14} className="shrink-0 mt-0.5 text-[#8a99ad]" />
+                          <span>
+                            Shown on your listing. Must not exceed the legal limit for where the property is.
+                          </span>
+                        </p>
+                      </div>
+
+                      <div className="rounded-[16px] border border-[#d6e6f5] bg-[#f3f8fd] p-4 space-y-3.5">
+                        <div className="flex items-start gap-2.5">
+                          <ShieldCheck size={18} className="text-[#136C9E] shrink-0 mt-0.5" strokeWidth={2} />
+                          <div>
+                            <p
+                              className="text-[13.5px] font-bold text-[#1e293b]"
+                              style={{ fontFamily: "Archivo,sans-serif" }}
+                            >
+                              Deposit protection
+                            </p>
+                            <p className="text-[12.5px] text-[#30506f] mt-1.5 leading-relaxed">
+                              If you take a deposit, you’re legally required to protect it in a
+                              government-approved deposit protection scheme and give your tenant the scheme
+                              details within the legal deadline. Unprotected deposits can lead to financial
+                              penalties and limit your ability to regain possession.
+                            </p>
+                          </div>
+                        </div>
+
+                        <label className="flex items-start gap-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(property.depositProtectionConfirmed)}
+                            onChange={(e) =>
+                              patchDeposit({ depositProtectionConfirmed: e.target.checked })
+                            }
+                            className="mt-0.5 w-4 h-4 rounded border-[#b8c4d3] text-[#136C9E] focus:ring-[#136C9E]"
+                          />
+                          <span
+                            className="text-[13px] font-medium text-[#1e293b] leading-snug"
+                            style={{ fontFamily: "Archivo,sans-serif" }}
+                          >
+                            I confirm I’ll protect any deposit in a government-approved scheme within the
+                            legal deadline. <span className="text-[#e5484d]">*</span>
+                          </span>
+                        </label>
+
+                        <div>
+                          <label
+                            className="block text-[13px] font-semibold text-[#334155] mb-2"
+                            style={{ fontFamily: "Archivo,sans-serif" }}
+                          >
+                            Who will protect it?{" "}
+                            <span className="text-[#94a3b8] font-normal">(optional)</span>
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            {(
+                              [
+                                { id: "landlord" as const, label: "I will" },
+                                { id: "agent" as const, label: "My letting agent will" },
+                              ]
+                            ).map((opt) => {
+                              const on = property.depositProtectedBy === opt.id;
+                              return (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() =>
+                                    patchDeposit({
+                                      depositProtectedBy: on ? null : opt.id,
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1.5 rounded-full border-[1.5px] px-4 py-2 text-[13.5px] font-medium"
+                                  style={{
+                                    borderColor: on ? "#136C9E" : "#d5dde7",
+                                    background: on ? "#136C9E" : "#fff",
+                                    color: on ? "#fff" : "#1e293b",
+                                    fontFamily: "Archivo,sans-serif",
+                                  }}
+                                >
+                                  {on && <Check size={14} strokeWidth={3} />}
+                                  {opt.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Other / non-compliance documents */}
+                <SCard>
+                  <div className="flex items-center justify-between px-5 pt-5 pb-4" style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <p className="text-[14px] font-bold text-[#1e293b]" style={{ fontFamily: "Archivo,sans-serif" }}>
+                      Other documents
                     </p>
                     <button
                       type="button"
                       onClick={() => setIsDocUploadOpen(true)}
-                      className="text-[13px] font-semibold px-4 py-2.5 rounded-[12px] transition-all hover:opacity-90"
-                      style={{ background: "#136C9E", color: "white", fontFamily: "Archivo,sans-serif" }}
+                      className="flex items-center gap-1.5 text-[12.5px] font-semibold px-3.5 py-2 rounded-[10px] transition-all hover:bg-[#eaf3f8]"
+                      style={{ color: "#136C9E", fontFamily: "Archivo,sans-serif" }}
                     >
-                      Upload Documents
+                      <Plus size={14} /> Upload Document
                     </button>
                   </div>
-                ) : (
-                  <ul className="divide-y divide-[#f1f5f9]">
-                    {property.documents.map((doc) => (
-                      <li key={doc.id} className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-[#f8fafc] transition-colors" onClick={() => setSelectedDoc(doc)}>
-                        <DocStatusIcon status={doc.status} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13.5px] font-semibold text-[#1e293b] truncate">{doc.name}</p>
-                          <p className="text-[11.5px] text-[#64748b]">{DOC_TYPE_LABELS[doc.type] ?? doc.type}</p>
-                        </div>
-                        <div className="text-right text-[11.5px] text-[#94a3b8] shrink-0">
-                          <p>Issued {dates.docs[doc.id]?.issue ?? "—"}</p>
-                          {doc.expiryDate && <p>Expires {dates.docs[doc.id]?.expiry ?? "—"}</p>}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </SCard>
+                  {(() => {
+                    const otherDocs = (property.documents ?? []).filter(
+                      (d) => !COMPLIANCE_DOC_TYPES.has(d.type),
+                    );
+                    if (!otherDocs.length) {
+                      return (
+                        <p className="px-5 py-6 text-[13px] text-[#64748b]">
+                          No other documents yet. Tenancy agreements, insurance and misc files appear here.
+                        </p>
+                      );
+                    }
+                    return (
+                      <ul className="divide-y divide-[#f1f5f9]">
+                        {otherDocs.map((doc) => (
+                          <li
+                            key={doc.id}
+                            className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-[#f8fafc] transition-colors"
+                            onClick={() => setSelectedDoc(doc)}
+                          >
+                            <DocStatusIcon status={doc.status} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13.5px] font-semibold text-[#1e293b] truncate">{doc.name}</p>
+                              <p className="text-[11.5px] text-[#64748b]">{DOC_TYPE_LABELS[doc.type] ?? doc.type}</p>
+                            </div>
+                            <div className="text-right text-[11.5px] text-[#94a3b8] shrink-0">
+                              <p>Issued {dates.docs[doc.id]?.issue ?? "—"}</p>
+                              {doc.expiryDate && <p>Expires {dates.docs[doc.id]?.expiry ?? "—"}</p>}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  })()}
+                </SCard>
+              </div>
             )}
 
             {/* ── Photos tab ──────────────────────────────────────────────── */}
@@ -1264,6 +1692,31 @@ export function PropertyDetails({
               </SCard>
             )}
 
+            {/* Draft card */}
+            {(property.status as string) === 'draft' && (
+              <SCard className="p-4">
+                <div className="text-center py-4">
+                  <div className="w-12 h-12 rounded-[14px] flex items-center justify-center mx-auto mb-3" style={{ background: "#f1f5f9" }}>
+                    <FileText size={22} className="text-[#64748b]" />
+                  </div>
+                  <p className="text-[14px] font-bold text-[#1e293b] mb-1" style={{ fontFamily: "Archivo,sans-serif" }}>
+                    Draft property
+                  </p>
+                  <p className="text-[12.5px] text-[#64748b] mb-4">
+                    Not live on the market. Complete verification documents, then mark as Vacant to publish.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => updateProperty(property.id, { status: 'vacant' as any })}
+                    className="w-full h-[42px] rounded-[12px] flex items-center justify-center gap-2 text-[13px] font-semibold text-white transition-all hover:opacity-90"
+                    style={{ background: "#DC5F12", fontFamily: "Archivo,sans-serif", boxShadow: "0 3px 10px rgba(220,95,18,0.25)" }}
+                  >
+                    <CheckCircle size={15} /> Mark as Vacant
+                  </button>
+                </div>
+              </SCard>
+            )}
+
             {/* Vacant card */}
             {property.status === "vacant" && !property.tenant && (
               <SCard className="p-4">
@@ -1335,36 +1788,69 @@ export function PropertyDetails({
               </SCard>
             )}
 
-            {/* Compliance Status */}
+            {/* Compliance Status — mirrors Add Property compliance checklist */}
             <SCard className="p-4">
               <p className="text-[11px] uppercase font-bold tracking-wider text-[#94a3b8] mb-3 px-1" style={{ fontFamily: "Archivo,sans-serif" }}>
                 Compliance Status
               </p>
-              {(property.documents ?? []).length === 0 ? (
-                <p className="text-[12.5px] text-[#64748b] leading-relaxed">
-                  No documents uploaded.{" "}
-                  <button
-                    type="button"
-                    onClick={() => setIsDocUploadOpen(true)}
-                    className="underline text-[#136C9E] font-semibold"
-                  >
-                    Upload compliance documents
-                  </button>{" "}
-                  to track their status.
-                </p>
-              ) : (
-                <ul className="space-y-2.5">
-                  {property.documents.map((doc) => (
-                    <li key={doc.id} className="flex items-center justify-between">
-                      <span className="text-[12.5px] text-[#334155] truncate">{DOC_TYPE_LABELS[doc.type] ?? doc.type}</span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <DocStatusIcon status={doc.status} />
-                        <span className="text-[11.5px] text-[#64748b] capitalize">{doc.status.replace("-", " ")}</span>
-                      </div>
+              <ul className="space-y-2.5">
+                {COMPLIANCE_UPLOAD_ITEMS.map((item) => {
+                  const doc = latestDocOfType(item.key);
+                  const ok = Boolean(doc);
+                  return (
+                    <li key={item.key} className="flex items-center justify-between gap-2">
+                      <span className="text-[12.5px] text-[#334155] truncate">{item.title}</span>
+                      <span
+                        className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                        style={{
+                          background: ok ? "#ecfdf5" : "#f1f5f9",
+                          color: ok ? "#047857" : "#64748b",
+                          fontFamily: "Archivo,sans-serif",
+                        }}
+                      >
+                        {ok ? "Uploaded" : "Missing"}
+                      </span>
                     </li>
-                  ))}
-                </ul>
-              )}
+                  );
+                })}
+                {(() => {
+                  const takes = property.takesDeposit;
+                  const depositOk =
+                    takes === "no" ||
+                    (takes === "yes" &&
+                      Boolean(property.depositProtectionConfirmed) &&
+                      Number(property.depositAmount) > 0);
+                  return (
+                    <li className="flex items-center justify-between gap-2">
+                      <span className="text-[12.5px] text-[#334155] truncate">Deposit</span>
+                      <span
+                        className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                        style={{
+                          background: depositOk ? "#ecfdf5" : "#f1f5f9",
+                          color: depositOk ? "#047857" : "#64748b",
+                          fontFamily: "Archivo,sans-serif",
+                        }}
+                      >
+                        {takes === "no"
+                          ? "No deposit"
+                          : depositOk
+                            ? "Confirmed"
+                            : takes === "yes"
+                              ? "Incomplete"
+                              : "Not set"}
+                      </span>
+                    </li>
+                  );
+                })()}
+              </ul>
+              <button
+                type="button"
+                onClick={() => setActiveTab("documents")}
+                className="mt-3 text-[12px] font-semibold text-[#136C9E] hover:underline"
+                style={{ fontFamily: "Archivo,sans-serif" }}
+              >
+                Manage compliance →
+              </button>
             </SCard>
 
             {/* Property Summary */}

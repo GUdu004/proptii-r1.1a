@@ -145,15 +145,118 @@ export class CreatePropertyDto {
   @IsOptional()
   amenities?: string[];
 
+  @ApiPropertyOptional({
+    description: 'Structured amenity selections with optional access/cost metadata',
+  })
+  @IsArray()
+  @IsOptional()
+  amenityDetails?: Array<{
+    amenityId: string;
+    accessType?: 'private' | 'shared' | 'communal';
+    additionalCost?: boolean;
+    notes?: string;
+  }>;
+
+  @ApiPropertyOptional({ description: 'Free-text additional features not in the catalogue' })
+  @IsString()
+  @IsOptional()
+  additionalFeatures?: string;
+
+  @ApiPropertyOptional({
+    description: 'UK property classification (category / type group / subtype)',
+  })
+  @IsOptional()
+  propertyClassification?: {
+    categoryId: string;
+    typeGroupId: string;
+    subtypeId: string;
+  };
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  receptionRooms?: number | string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  floorNumber?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  constructionType?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  tenure?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  epcRating?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  propertyUse?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  numberOfFloors?: number | string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  buildingSpecification?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  permittedUse?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  businessRates?: number | string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  landArea?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  planningStatus?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  landAccess?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  landUtilities?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  boundaries?: string;
+
   @ApiPropertyOptional({ example: ['https://example.com/photo1.jpg'], description: 'Photos array' })
   @IsArray()
   @IsOptional()
   photos?: any[];
 
-  @ApiPropertyOptional({ example: 'vacant', enum: ['vacant', 'occupied', 'under_offer', 'archived'] })
+  @ApiPropertyOptional({
+    example: 'vacant',
+    enum: ['vacant', 'occupied', 'under_offer', 'under-renovation', 'draft', 'archived'],
+    description: 'Listing lifecycle status. draft is non-searchable (C1 soft gate allows draft saves).',
+  })
   @IsString()
   @IsOptional()
-  @IsIn(['vacant', 'occupied', 'under_offer', 'archived'])
+  @IsIn(['vacant', 'occupied', 'under_offer', 'under-renovation', 'draft', 'archived'])
   status?: string;
 
   @ApiPropertyOptional({ example: '100023336956', description: 'Unique Property Reference Number (UPRN)' })
@@ -339,15 +442,116 @@ export class UpdatePropertyDto {
   @IsOptional()
   amenities?: string[];
 
+  @ApiPropertyOptional({
+    description: 'Structured amenity selections with optional access/cost metadata',
+  })
+  @IsArray()
+  @IsOptional()
+  amenityDetails?: Array<{
+    amenityId: string;
+    accessType?: 'private' | 'shared' | 'communal';
+    additionalCost?: boolean;
+    notes?: string;
+  }>;
+
+  @ApiPropertyOptional({ description: 'Free-text additional features not in the catalogue' })
+  @IsString()
+  @IsOptional()
+  additionalFeatures?: string;
+
+  @ApiPropertyOptional({
+    description: 'UK property classification (category / type group / subtype)',
+  })
+  @IsOptional()
+  propertyClassification?: {
+    categoryId: string;
+    typeGroupId: string;
+    subtypeId: string;
+  };
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  receptionRooms?: number | string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  floorNumber?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  constructionType?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  tenure?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  epcRating?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  propertyUse?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  numberOfFloors?: number | string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  buildingSpecification?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  permittedUse?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  businessRates?: number | string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  landArea?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  planningStatus?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  landAccess?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  landUtilities?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  boundaries?: string;
+
   @ApiPropertyOptional()
   @IsArray()
   @IsOptional()
   photos?: any[];
 
-  @ApiPropertyOptional({ enum: ['vacant', 'occupied', 'under_offer', 'archived'] })
+  @ApiPropertyOptional({
+    enum: ['vacant', 'occupied', 'under_offer', 'under-renovation', 'draft', 'archived'],
+  })
   @IsString()
   @IsOptional()
-  @IsIn(['vacant', 'occupied', 'under_offer', 'archived'])
+  @IsIn(['vacant', 'occupied', 'under_offer', 'under-renovation', 'draft', 'archived'])
   status?: string;
 
   @ApiPropertyOptional({ example: '100023336956' })

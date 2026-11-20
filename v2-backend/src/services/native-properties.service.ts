@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, InternalServerErrorException, Optional } from '@nestjs/common';
+import { Injectable, NotFoundException, InternalServerErrorException, Optional, BadRequestException } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { UprnMatchService } from '../gov-data/services/uprn-match.service';
 import { getRedisClient } from '../utils/redis-client';
+import { ReadyToPublishService } from './ready-to-publish.service';
 
 function isPropertyAuthorized(existing: any, userId?: string, userEmail?: string): boolean {
   if (!existing) return false;
@@ -79,7 +80,29 @@ export interface PaginatedSearchOptions {
 export class NativePropertiesService {
   constructor(
     @Optional() private readonly uprnMatchService?: UprnMatchService,
+    @Optional() private readonly readyToPublish?: ReadyToPublishService,
   ) {}
+
+  /** C1: reject writes that would make a property publicly searchable without verification. */
+  private async assertReadyToPublishOrThrow(
+    landlordId: string,
+    propertyId: string | undefined,
+    nextStatus: string | undefined | null,
+    previousStatus: string | undefined | null,
+    documentsHint?: any[],
+  ) {
+    if (!this.readyToPublish) return;
+    if (!this.readyToPublish.wouldBecomeSearchable(nextStatus, previousStatus)) return;
+
+    const result = await this.readyToPublish.check(landlordId, propertyId, documentsHint);
+    if (result.ok) return;
+
+    throw new BadRequestException({
+      message: 'Property cannot be made available until verification items are submitted.',
+      code: 'C1_VERIFICATION_REQUIRED',
+      missing: result.missing,
+    });
+  }
 
   private get db() {
     if (!admin.apps.length) return null;
@@ -259,6 +282,15 @@ export class NativePropertiesService {
     }
 
     try {
+      const landlordId = data.landlordId || data.userId;
+      await this.assertReadyToPublishOrThrow(
+        landlordId,
+        undefined,
+        data?.status,
+        undefined,
+        data?.documents,
+      );
+
       const docRef = col.doc();
       const specWarning = checkSpecificationAnomaly(data?.bedrooms, data?.bathrooms ?? data?.bathroom_count);
       if (specWarning) {
@@ -300,7 +332,6 @@ export class NativePropertiesService {
       console.log(`[NativePropertiesService] Successfully saved property ${docRef.id} to Firestore.`);
 
       // ── Task p4-9: Pre-aggregate landlord financials with FieldValue.increment() ──
-      const landlordId = data.landlordId || data.userId;
       if (landlordId) {
         await this.updateLandlordPortfolioSummary(landlordId, {
           properties: 1,
@@ -335,6 +366,23 @@ export class NativePropertiesService {
     // Clean undefined values to prevent Firestore driver errors
     const cleanedData = JSON.parse(JSON.stringify(data, (key, value) => value === undefined ? null : value));
 
+    // Match the status coercion below (tenant cleared → vacant) so the C1 gate sees the real outcome.
+    let nextStatus =
+      cleanedData.status !== undefined && cleanedData.status !== null
+        ? cleanedData.status
+        : existing?.status;
+    if (cleanedData.status === 'vacant' || cleanedData.tenantId === null) {
+      nextStatus = cleanedData.status || 'vacant';
+    }
+    const landlordId = existing?.landlordId || existing?.userId || userId;
+    await this.assertReadyToPublishOrThrow(
+      landlordId,
+      id,
+      nextStatus,
+      existing?.status,
+      cleanedData.documents ?? existing?.documents,
+    );
+
     const mergedBeds = cleanedData.bedrooms !== undefined ? cleanedData.bedrooms : existing?.bedrooms;
     const mergedBaths = cleanedData.bathrooms !== undefined ? cleanedData.bathrooms : (cleanedData.bathroom_count !== undefined ? cleanedData.bathroom_count : (existing?.bathrooms ?? existing?.bathroom_count));
     const specWarning = checkSpecificationAnomaly(mergedBeds, mergedBaths);
@@ -360,8 +408,6 @@ export class NativePropertiesService {
     const rentDiff = newRent - oldRent;
 
     await docRef.update(updatedData);
-
-    const landlordId = existing?.landlordId || existing?.userId || userId;
     if (landlordId) {
       const wasArchived = existing?.status === 'archived' || existing?.archived === true || existing?.isArchived === true;
       const isNowArchived = updatedData?.status === 'archived' || updatedData?.archived === true || updatedData?.isArchived === true;

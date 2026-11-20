@@ -102,6 +102,35 @@ describe('Property DTO Validation (Task p4-4)', () => {
     expect(errors.length).toBe(0);
   });
 
+  it('whitelists UK classification, description, and amenityDetails fields', async () => {
+    const raw = {
+      title: 'Detached house',
+      address: '12 Church Lane, London SW1A 1AA',
+      price: 3200,
+      description: 'Bright family home with private garden and driveway.',
+      amenities: ['private_garden', 'private_driveway', 'dishwasher'],
+      amenityDetails: [
+        { amenityId: 'private_garden', accessType: 'private' },
+        { amenityId: 'dishwasher' },
+      ],
+      additionalFeatures: 'South-facing aspect',
+      propertyClassification: {
+        categoryId: 'residential',
+        typeGroupId: 'house',
+        subtypeId: 'detached-house',
+      },
+      tenure: 'freehold',
+      epcRating: 'C',
+    };
+
+    const dto = plainToInstance(CreatePropertyDto, raw);
+    const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    expect(errors.length).toBe(0);
+    expect(dto.description).toContain('Bright family home');
+    expect(dto.propertyClassification?.subtypeId).toBe('detached-house');
+    expect(dto.amenities).toContain('private_garden');
+  });
+
   it('whitelists userId and defaultRiskScore in CreateTenantDto without forbidNonWhitelisted errors', async () => {
     const raw = {
       name: 'John Smith',

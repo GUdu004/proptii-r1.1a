@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { NativePropertiesController } from '../../controllers/native-properties.controller';
+import { PropertyCatalogueController } from '../../controllers/property-catalogue.controller';
 import { SavedPropertiesController } from '../../controllers/saved-properties.controller';
 import { PropertySelectionsController } from '../../controllers/property-selections.controller';
 import { HomeownerController } from '../../controllers/homeowner.controller';
@@ -13,12 +14,14 @@ import { SavedPropertiesService } from '../../services/saved-properties.service'
 import { PropertySelectionsService } from '../../services/property-selections.service';
 import { HomeownerService } from '../../services/homeowner.service';
 import { ClassifierService } from '../../search/classifier.service';
+import { ReadyToPublishService } from '../../services/ready-to-publish.service';
 import { GovDataModule } from '../../gov-data/gov-data.module';
 
 @Module({
   imports: [GovDataModule],
   controllers: [
     NativePropertiesController,
+    PropertyCatalogueController,
     SavedPropertiesController,
     PropertySelectionsController,
     HomeownerController,
@@ -33,12 +36,14 @@ import { GovDataModule } from '../../gov-data/gov-data.module';
     PropertySelectionsService,
     HomeownerService,
     ClassifierService,
+    ReadyToPublishService,
   ],
   exports: [
     NativePropertiesService,
     SavedPropertiesService,
     PropertySelectionsService,
     HomeownerService,
+    ReadyToPublishService,
   ],
 })
 export class PropertiesModule {}
